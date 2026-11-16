@@ -12,6 +12,7 @@ from dropwin.platform.intel_ax201_transport import (
     QUZ_MAX_PENDING_TFDS,
     TxBuffer,
     encode_gen2_tx_doorbell_value,
+    encode_quz_tx_byte_count_entry,
     encode_quz_rx_buffer_descriptor,
     extract_quz_rx_completion_vid,
     encode_iwl_tfh_tfd,
@@ -139,6 +140,44 @@ def test_quz_tx_pending_count_is_modular_and_leaves_one_slot_empty() -> None:
 def test_quz_tx_pointer_rejects_invalid_values(pointer) -> None:
     with pytest.raises((TypeError, ValueError)):
         quz_tx_queue_advance(pointer)
+
+
+
+def test_quz_tx_byte_count_entry_uses_dwords_and_tfd_fetch_chunks() -> None:
+    # 101 bytes rounds up to 26 dwords; one active TB uses one 64-byte fetch.
+    assert encode_quz_tx_byte_count_entry(byte_count=101, num_tbs=1) == struct.pack(
+        "<H", 26
+    )
+    # 7 TBs make a 72-byte populated TFD prefix, requiring a second 64-byte chunk.
+    assert encode_quz_tx_byte_count_entry(byte_count=100, num_tbs=7) == struct.pack(
+        "<H", 25 | (1 << 12)
+    )
+    # 25 TBs occupy 252 bytes, requiring four chunks (zero-based value 3).
+    assert encode_quz_tx_byte_count_entry(byte_count=100, num_tbs=25) == struct.pack(
+        "<H", 25 | (3 << 12)
+    )
+
+
+@pytest.mark.parametrize(
+    ("byte_count", "num_tbs", "error"),
+    [
+        (0, 1, ValueError),
+        (-1, 1, ValueError),
+        (0x0FFF * 4 + 1, 1, ValueError),
+        (True, 1, TypeError),
+        (1, 0, ValueError),
+        (1, 26, ValueError),
+        (1, True, TypeError),
+    ],
+)
+def test_quz_tx_byte_count_entry_rejects_invalid_values(
+    byte_count, num_tbs, error
+) -> None:
+    with pytest.raises(error):
+        encode_quz_tx_byte_count_entry(
+            byte_count=byte_count,
+            num_tbs=num_tbs,
+        )
 
 
 def test_gen2_tx_doorbell_value_is_only_a_packed_integer() -> None:
