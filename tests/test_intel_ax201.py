@@ -9,8 +9,10 @@ from dropwin.platform.intel_ax201 import (
     FirmwareFormatError,
     IntelRfVariant,
     PciIdentity,
+    firmware_filename_for_rf_id,
     firmware_filename_for_rf_variant,
     identify_intel_radio,
+    identify_intel_rf,
     inspect_iwl_tlv_firmware,
 )
 
@@ -88,6 +90,45 @@ def test_rejects_unknown_rf_variant_and_unsupported_api() -> None:
         firmware_filename_for_rf_variant("UNKNOWN")
     with pytest.raises(ValueError, match="API"):
         firmware_filename_for_rf_variant("JF1", api=76)
+
+
+def test_decodes_known_intel_controller_rf_id_without_hardware_access() -> None:
+    # Linux CSR_HW_RFID_TYPE/STEP decode for the documented 0x108110 example.
+    identity = identify_intel_rf(0x108110)
+    assert identity is not None
+    assert identity.type_code == 0x108
+    assert identity.step == 1
+    assert identity.variant is IntelRfVariant.JF1
+    assert firmware_filename_for_rf_id(0x108110) == "iwlwifi-QuZ-a0-jf-b0-77.ucode"
+
+
+@pytest.mark.parametrize(
+    ("raw_rf_id", "expected"),
+    [
+        (0x105110, IntelRfVariant.JF2),
+        (0x108110, IntelRfVariant.JF1),
+        (0x10A110, IntelRfVariant.HR2),
+        (0x10C110, IntelRfVariant.HR1),
+    ],
+)
+def test_decodes_supported_jf_and_hr_rf_type_codes(raw_rf_id, expected) -> None:
+    identity = identify_intel_rf(raw_rf_id)
+    assert identity is not None
+    assert identity.variant is expected
+
+
+def test_unknown_rf_id_does_not_guess_firmware_family() -> None:
+    assert identify_intel_rf(0x10D110) is None
+    assert firmware_filename_for_rf_id(0x10D110) is None
+
+
+def test_rf_id_parser_rejects_invalid_numeric_values() -> None:
+    with pytest.raises(TypeError, match="integer"):
+        identify_intel_rf("0x108110")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="unsigned 32-bit"):
+        identify_intel_rf(-1)
+    with pytest.raises(ValueError, match="unsigned 32-bit"):
+        identify_intel_rf(0x1_0000_0000)
 
 
 def make_tlv_firmware(
