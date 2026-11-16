@@ -15,6 +15,10 @@ from dropwin.platform.intel_ax201_transport import (
     encode_quz_tx_byte_count_entry,
     encode_quz_rx_buffer_descriptor,
     extract_quz_rx_completion_vid,
+    quz_rx_queue_advance,
+    quz_rx_queue_size,
+    quz_rx_queue_space,
+    validate_quz_rx_vid,
     encode_iwl_tfh_tfd,
     quz_tx_pending_count,
     quz_tx_queue_advance,
@@ -121,6 +125,74 @@ def test_quz_rx_completion_extracts_low_12_bit_vid() -> None:
 def test_quz_rx_completion_rejects_zero_or_out_of_range_word(word) -> None:
     with pytest.raises((TypeError, ValueError)):
         extract_quz_rx_completion_vid(word)
+
+
+
+@pytest.mark.parametrize(("he_enabled", "expected"), [(False, 512), (True, 2048)])
+def test_quz_rx_queue_size_is_mode_dependent(he_enabled, expected) -> None:
+    assert quz_rx_queue_size(he_enabled=he_enabled) == expected
+
+
+@pytest.mark.parametrize("he_enabled", [0, 1, None, "yes"])
+def test_quz_rx_queue_size_rejects_non_boolean_mode(he_enabled) -> None:
+    with pytest.raises(TypeError):
+        quz_rx_queue_size(he_enabled=he_enabled)
+
+
+@pytest.mark.parametrize(
+    ("pointer", "size", "expected"),
+    [(0, 512, 1), (510, 512, 511), (511, 512, 0),
+     (2046, 2048, 2047), (2047, 2048, 0)],
+)
+def test_quz_rx_queue_pointer_wrap(pointer, size, expected) -> None:
+    assert quz_rx_queue_advance(pointer, queue_size=size) == expected
+
+
+@pytest.mark.parametrize(
+    ("read_pointer", "write_pointer", "size", "expected"),
+    [(0, 0, 512, 511), (10, 0, 512, 9), (0, 510, 512, 1),
+     (0, 0, 2048, 2047), (3, 2046, 2048, 4)],
+)
+def test_quz_rx_queue_space_keeps_one_slot_empty(
+    read_pointer, write_pointer, size, expected
+) -> None:
+    assert quz_rx_queue_space(read_pointer, write_pointer, queue_size=size) == expected
+
+
+@pytest.mark.parametrize("vid", [0, 1, 511, 2047])
+def test_quz_rx_vid_is_checked_against_selected_pool(vid) -> None:
+    if vid == 0 or vid >= 512:
+        with pytest.raises(ValueError):
+            validate_quz_rx_vid(vid=vid, pool_size=512)
+    else:
+        assert validate_quz_rx_vid(vid=vid, pool_size=512) == vid
+
+
+def test_quz_rx_vid_accepts_high_ids_only_in_larger_pool() -> None:
+    assert validate_quz_rx_vid(vid=2047, pool_size=2048) == 2047
+    with pytest.raises(ValueError):
+        validate_quz_rx_vid(vid=2047, pool_size=512)
+
+
+@pytest.mark.parametrize(
+    ("vid", "pool_size", "error"),
+    [(1, 0, ValueError), (1, 2049, ValueError), (True, 512, TypeError),
+     (512, 512, ValueError), (1 << 12, 2048, ValueError)],
+)
+def test_quz_rx_vid_rejects_invalid_pool_or_id(vid, pool_size, error) -> None:
+    with pytest.raises(error):
+        validate_quz_rx_vid(vid=vid, pool_size=pool_size)
+
+
+@pytest.mark.parametrize(
+    ("read_pointer", "write_pointer", "size"),
+    [(-1, 0, 512), (0, 512, 512), (0, 0, 256), (0, 0, 4096)],
+)
+def test_quz_rx_queue_space_rejects_invalid_ring_parameters(
+    read_pointer, write_pointer, size
+) -> None:
+    with pytest.raises(ValueError):
+        quz_rx_queue_space(read_pointer, write_pointer, queue_size=size)
 
 
 def test_quz_tx_counter_wraps_at_256() -> None:
