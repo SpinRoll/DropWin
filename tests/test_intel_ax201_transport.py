@@ -13,6 +13,7 @@ from dropwin.platform.intel_ax201_transport import (
     TxBuffer,
     encode_gen2_tx_doorbell_value,
     encode_quz_rx_buffer_descriptor,
+    extract_quz_rx_completion_vid,
     encode_iwl_tfh_tfd,
     quz_tx_pending_count,
     quz_tx_queue_advance,
@@ -107,6 +108,18 @@ def test_quz_rx_buffer_descriptor_is_8_bytes_and_packs_12_bit_vid() -> None:
 def test_quz_rx_buffer_descriptor_rejects_invalid_fields(rbid, address, error) -> None:
     with pytest.raises(error):
         encode_quz_rx_buffer_descriptor(rbid=rbid, dma_address=address)
+
+
+
+def test_quz_rx_completion_extracts_low_12_bit_vid() -> None:
+    assert extract_quz_rx_completion_vid(0xA5BC0123) == 0x123
+    assert extract_quz_rx_completion_vid(0x00000FFF) == 0xFFF
+
+
+@pytest.mark.parametrize("word", [0, -1, 1 << 32, True])
+def test_quz_rx_completion_rejects_zero_or_out_of_range_word(word) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        extract_quz_rx_completion_vid(word)
 
 
 def test_quz_tx_counter_wraps_at_256() -> None:
