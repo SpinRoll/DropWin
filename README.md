@@ -127,3 +127,7 @@ This project is currently marked as **GPL-3.0-or-later** to align with the inten
 ## Disclaimer
 
 DropWin is an independent community project and is not affiliated with, endorsed by, or sponsored by Apple Inc. AirDrop and Apple are trademarks of Apple Inc.
+
+## AX201 Gen2 descriptor research
+
+A host-only Python module now serializes the Intel Gen2/TFH TX TFD, QuZ's 8-byte RX buffer descriptor and its pre-AX210 TX byte-count table entry, enforces the 36-bit QuZ TX DMA aperture and 512-queue configuration, and tests queue pointer arithmetic. The RX encoder follows the pre-AX210 `page_dma | vid` layout; the 16-byte RX transfer descriptor belongs to AX210-and-later families and is intentionally not used for QuZ. This is offline format work only: DropWin does not allocate DMA, write device registers, load firmware, or transmit/receive radio frames. Pure helpers now model the Linux QuZ RX ring sizes (512 non-HE / 2048 HE), one-empty-slot free-space arithmetic, and VID bounds against a caller-selected pool; the actual active Lenovo RF/firmware mode and full free/used ownership/refill lifecycle remain unverified and unimplemented. A validated Windows radio backend is also still missing. See [the AX201 engineering notes](docs/ax201-windows-radio-port.md).
