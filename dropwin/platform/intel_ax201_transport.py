@@ -321,6 +321,10 @@ def quz_rx_completed_count(
     The firmware status index is the exclusive end position, matching the
     Linux RX loop (host read index advances until it equals the status index).
     """
+    if isinstance(queue_size, bool) or not isinstance(queue_size, int):
+        raise TypeError("RX queue size must be an integer")
+    if queue_size not in (QUZ_RX_QUEUE_SIZE_NON_HE, QUZ_RX_QUEUE_SIZE_HE):
+        raise ValueError("QuZ RX queue size must be 512 or 2048 entries")
     for name, pointer in (
         ("host read", read_pointer),
         ("firmware read", firmware_read_pointer),
@@ -328,10 +332,6 @@ def quz_rx_completed_count(
         _require_uint(pointer, bits=16, field=f"QuZ RX {name} pointer")
         if pointer >= queue_size:
             raise ValueError("QuZ RX pointer must be smaller than queue size")
-    if isinstance(queue_size, bool) or not isinstance(queue_size, int):
-        raise TypeError("RX queue size must be an integer")
-    if queue_size not in (QUZ_RX_QUEUE_SIZE_NON_HE, QUZ_RX_QUEUE_SIZE_HE):
-        raise ValueError("QuZ RX queue size must be 512 or 2048 entries")
     return (firmware_read_pointer - read_pointer) & (queue_size - 1)
 
 
