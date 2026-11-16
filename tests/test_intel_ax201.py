@@ -35,6 +35,8 @@ def test_identifies_exact_lenovo_ax201_without_device_access() -> None:
     assert profile.device_family == 22000
     assert profile.gen2_transport is True
     assert profile.integrated_radio is True
+    assert profile.num_of_queues == 512
+    assert profile.max_tfd_queue_size == 256
     assert profile.xtal_latency_us == 12_000
     assert profile.ltr_delay_us == 2_500
     assert profile.low_latency_xtal is True
