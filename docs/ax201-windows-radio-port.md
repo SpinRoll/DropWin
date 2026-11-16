@@ -48,6 +48,18 @@ References:
 - Public firmware inventory: https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware/+/refs/heads/main/intel/iwlwifi/
 - AX211 prototype's pinned SO/GF firmware and parser: https://github.com/21Suspect/AirDrop-for-Windows/blob/main/native/awdl/src/ax211.rs and https://github.com/21Suspect/AirDrop-for-Windows/blob/main/native/intel/iwl_firmware.h
 
+### 3. QuZ queue parameters are not the AX211/SO queue parameters
+
+Linux `cfg/22000.c` sets the QuZ base `max_tfd_queue_size` to **256**. Linux `cfg/ax210.c`, used for the SO/AX211 family, sets it to **65,536**. Linux `pcie/tx-gen2.c` uses this value as a power-of-two wrap mask in queue-space accounting, so it affects real queue-counter behavior and cannot be treated as a cosmetic constant. The AX201 host profile now records the QuZ value of 256.
+
+There is an additional porting point to resolve: the AX211 Windows prototype declares a 256-entry software TX buffer (`IWL_TX_COUNT`) and separately documents 16-bit hardware pointer wrap. A software slot count is not the same thing as the hardware queue-counter modulus. Before reusing any of its queue code, map the QuZ hardware write/read pointer, TFD ring size, queue-context fields, RX free/used rings and completion sequence independently against Linux's 22000 implementation. Do not copy the SO/GF queue arithmetic or infer it from a constant named `TX_COUNT`.
+
+Sources:
+- Linux QuZ queue base: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/cfg/22000.c
+- Linux AX210/SO queue base: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/cfg/ax210.c
+- Linux queue wrap accounting: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/pcie/tx-gen2.c
+- Windows AX211 prototype queue context: https://github.com/21Suspect/AirDrop-for-Windows/blob/main/native/intel/iwl_gen3.h and https://github.com/21Suspect/AirDrop-for-Windows/blob/main/native/intel/iwl_gen3.c
+
 ### 3. The stock Windows Wi-Fi interface does not expose the needed path
 
 The user's read-only report after driver 24.80.0.2 still says:
