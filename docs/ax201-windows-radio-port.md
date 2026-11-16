@@ -295,3 +295,30 @@ Two additional host-only helpers capture details specific to the QuZ multi-queue
 These arithmetic helpers do not establish the active Lenovo queue count, RF configuration, completion interrupt mapping, or firmware initialization sequence. The completion cursor is not a free-running hardware counter model; it is a bounded ring index as used by the cited RX handler.
 
 Source: Linux `pcie/rx.c` describes the QuZ 32-bit used-buffer completion entry (low 12-bit VID), completion processing, queue-index wrap, 8-entry restock alignment, and pre-BZ RFH queue write-index update: https://linux.googlesource.com/linux/kernel/git/torvalds/linux/+/cdb3033e191fd03da2d7da23b9cd448dfa180a8e/drivers/net/wireless/intel/iwlwifi/pcie/rx.c (see `iwl_pcie_rxq_inc_wr_ptr`, `iwl_pcie_rxmq_restock`, `iwl_pcie_get_rxb`, and `iwl_pcie_rx_handle`).
+
+
+## QuZ multi-queue RX source map — 2026-11-16
+
+The Linux reference makes the following QuZ-specific distinctions explicit:
+
+| Object | QuZ / pre-AX210 representation | Meaning |
+|---|---|---|
+| Free RBD ring entry | 64-bit little-endian (`__le64`) | `page_dma | VID` |
+| Used/completion ring entry | 32-bit little-endian (`__le32`) | low 12 bits carry VID |
+| RX status block | `struct iwl_rb_status` | firmware-published closed-RB cursor/status |
+| RX ring depth | `trans->cfg->num_rbds` | selected RF configuration's RBD count |
+| VID lookup table | `RX_POOL_SIZE(trans_pcie->num_rx_bufs)` entries | global buffer pool; VID indexes `global_table[vid - 1]` |
+
+The RX ring depth and VID pool size are separate quantities in the driver and must not be treated as interchangeable. The public configuration header defines `IWL_NUM_RBDS_NON_HE` as 512 and `IWL_NUM_RBDS_HE` as 2048 (and an EHT constant of 4096 for newer configurations); the active value is carried in the RF configuration's `num_rbds` field. The existing host helper models the two documented QuZ modes only and does not infer which value the Lenovo uses.
+
+For each pre-AX210 multi-queue completion, Linux extracts the 12-bit VID, rejects zero and values above the VID pool bound, resolves `global_table[vid - 1]`, rejects an already-invalid buffer, and marks the buffer invalid before processing. When a free buffer is restocked, Linux clears that invalid flag, writes the 64-bit `page_dma | vid` entry, advances the queue write index, rounds the published index down to a multiple of eight, and updates the per-queue RFH free-buffer write-index register. The QuZ-family RX stop path disables RFH RX DMA and polls the RXF DMA idle bit with a bounded timeout; this is a hardware operation and is deliberately not implemented by DropWin.
+
+The source also confirms that the QuZ MAC config enables multi-queue RX and uses device family 22000. The dynamic firmware-name builder selects `jf` or `hr` from the RF type read from hardware; the current QuZ firmware declarations in `cfg/22000.c` list the QuZ HR API-77 image. This does **not** allow the Lenovo's JF/HR identity to be inferred from its PCI PnP ID or Windows firmware label. RF-ID remains an explicit unresolved hardware fact.
+
+Primary sources:
+- `pcie/rx.c`: https://linux.googlesource.com/linux/kernel/git/torvalds/linux/+/cdb3033e191fd03da2d7da23b9cd448dfa180a8e/drivers/net/wireless/intel/iwlwifi/pcie/rx.c
+- `iwl-config.h`: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/iwl-config.h
+- `cfg/22000.c`: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/cfg/22000.c
+- `iwl-drv.c` RF-type firmware-name selection: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/iwl-drv.c
+
+This source map is documentation only. It does not implement completion-ring allocation, shared status memory, global VID table allocation, DMA, RFH programming, firmware boot, interrupt delivery, or teardown.
