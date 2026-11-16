@@ -268,3 +268,18 @@ The layout is cross-referenced against Linux `iwl-fh.h` (TFH TFD/TB and 22000 ri
 - https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/iwl-config.h
 
 **Strict boundary:** these serializers operate only on caller-supplied integers and Python objects. They do not allocate/map DMA, choose a DMA mask, create queue memory, populate the TX byte-count table, configure interrupt handling, post descriptors, write a doorbell, or start firmware. The full QuZ RX ring/completion/status lifecycle and its parameters remain unimplemented. AX211 queue/session code is not copied. Synthetic tests verify byte layout and bounds only; no physical adapter validation or AWDL capability is claimed.
+
+
+## Synthetic QuZ RX buffer-ownership ledger — 2026-11-16
+
+A pure-Python `QuzRxBufferLedger` now models the VID ownership transitions documented by Linux's pre-AX210 multi-queue RX path:
+
+- `FREE -> POSTED -> COMPLETED` for a buffer placed in a queue and returned by a completion.
+- If the page was not taken by an upper layer: `COMPLETED -> FREE`, representing reuse of the same page.
+- If the page was taken: `COMPLETED -> USED -> ALLOCATOR_EMPTY -> ALLOCATOR_ALLOCATED -> FREE`, representing the need for a replacement page before the VID can be reposted.
+
+The ledger rejects out-of-pool VIDs, completion of a VID that is not currently posted, duplicate completion, and invalid ownership transitions. It exposes state counts for invariant-oriented synthetic tests.
+
+**Scope limitation:** this is an ownership *model*, not a Linux RX implementation. It intentionally does not model the per-queue RX completion/status rings, multi-queue batching thresholds, allocator request accounting, emergency path, memory/page allocation, DMA mapping, queue restock, interrupts, or stop/teardown synchronization. In particular, returning a replacement to `FREE` is a logical state transition only; it does not imply that a page exists or that any DMA mapping is valid. The Linux reference describes these additional mechanisms and the need to stop/synchronize RX before freeing resources. No hardware access or laptop changes were made.
+
+Source basis: Linux `pcie/rx.c` documents the VID lookup/invalid flag, completion handling, reused-page versus stolen-page paths, allocator movement, and RX DMA stop path: https://linux.googlesource.com/linux/kernel/git/torvalds/linux/+/cdb3033e191fd03da2d7da23b9cd448dfa180a8e/drivers/net/wireless/intel/iwlwifi/pcie/rx.c (notably the RBD lifecycle comments, `iwl_pcie_get_rxb`, `iwl_pcie_rx_handle_rb`, and `iwl_pcie_rx_stop`).
