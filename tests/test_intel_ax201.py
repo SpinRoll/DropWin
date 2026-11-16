@@ -138,7 +138,7 @@ def test_inspects_header_only_image() -> None:
         ),
         (
             (
-                bytearray(
+                bytes(
                     struct.pack("<II", 0, 0x0A4C5749)
                     + bytes(80)
                 )
