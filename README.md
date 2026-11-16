@@ -55,11 +55,21 @@ The initial development machine reported:
 
 This is a test target only. It is not yet validated for AWDL. Secure Boot and the stock driver should remain unchanged during initial research.
 
-## Research references
+## AX201 assessment — 2026-11-16
+
+The test machine's Intel Wi-Fi 6 AX201 is supported by Intel on Windows 11, and Intel's current driver page lists the AX201 in package 24.60.0. This is ordinary adapter/OS support, **not** evidence of AWDL, monitor-mode, raw 802.11 frame injection, or AWDL channel scheduling support. Intel's public compatibility material does not claim AirDrop/AWDL support for this adapter.
+
+The reported machine driver is 22.80.0.9. DropWin now includes a read-only diagnostic view based on `netsh wlan show drivers` and `netsh wlan show wirelesscapabilities`. These Windows reports can establish the driver and advertised WLAN capabilities, but cannot certify AWDL compatibility. No driver update, adapter reset, test-signing change, Secure Boot change, or packet injection is performed.
+
+The current `winawdl` research project documents a very different hardware path: it targets the Realtek RTL8852CE only and uses a custom radio driver. Its README explicitly says that support for other cards is not present. It is therefore a useful architectural reference, not a drop-in backend for this AX201 machine. Do not install its driver on this PC.
+
+Next decision gate: inspect the diagnostic output from the user's actual Windows installation, then determine whether the AX201/Intel driver exposes any viable documented path. If not, we must choose between researching a different internal Wi-Fi chipset or changing the project scope; we must not imply that an app-only wrapper can bypass missing driver/radio capabilities.
+
 
 - [OpenDrop](https://github.com/seemoo-lab/opendrop) — Python AirDrop protocol implementation; upstream documents macOS and Linux/AWDL requirements, not native Windows support.
 - [Open Wireless Link (OWL)](https://github.com/seemoo-lab/owl) — open AWDL implementation primarily for Linux.
-- [winawdl](https://github.com/raph559/winawdl) — experimental Windows AWDL/AirDrop work to study; its reported hardware support must not be generalized.
+- [winawdl](https://github.com/raph559/winawdl) — research implementation currently documented for Realtek RTL8852CE only; it uses a custom radio driver and is not compatible by assumption with Intel AX201.
+- [Intel Wi-Fi driver support](https://www.intel.com/content/www/us/en/support/articles/000046918/wireless.html) — current Windows driver package and supported adapter list.
 
 Any reuse of third-party code must follow its license and attribution requirements. No upstream repository is vendored in this initial scaffold.
 
