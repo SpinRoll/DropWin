@@ -199,16 +199,16 @@ class FirmwareTlv:
 class FirmwareImageSummary:
     file_bytes: int
     human_readable: str
-    major: int
-    minor: int
-    api: int
-    serial: int
+    header_version: int
     build: int
+    firmware_version_tlv: tuple[int, int, int] | None
     tlvs: tuple[FirmwareTlv, ...]
 
     @property
-    def version(self) -> str:
-        return f"{self.major}.{self.minor}.{self.api}.{self.serial}"
+    def version(self) -> str | None:
+        if self.firmware_version_tlv is None:
+            return None
+        return ".".join(str(value) for value in self.firmware_version_tlv)
 
     def count_tlv_type(self, type_id: int) -> int:
         return sum(record.type_id == type_id for record in self.tlvs)
@@ -217,9 +217,11 @@ class FirmwareImageSummary:
 def inspect_iwl_tlv_firmware(data: bytes) -> FirmwareImageSummary:
     """Inspect an Intel TLV image in memory; never loads or executes firmware.
 
-    The parser checks the common 88-byte TLV header and record boundaries.
-    It intentionally does not claim device compatibility, verify a vendor
-    signature, parse every TLV's semantic payload, or interact with hardware.
+    The parser checks the common 88-byte TLV header, the generic version/build
+    header fields, and aligned TLV record boundaries. If the FW_VERSION (36)
+    TLV is present, its three 32-bit words are retained separately. It does not
+    verify signatures, decode every TLV semantically, or establish device
+    compatibility.
     """
     if not isinstance(data, bytes):
         raise TypeError("firmware data must be bytes")
@@ -232,14 +234,14 @@ def inspect_iwl_tlv_firmware(data: bytes) -> FirmwareImageSummary:
     if zero != 0 or magic != IWL_TLV_MAGIC:
         raise FirmwareFormatError("invalid Intel TLV firmware magic/header")
 
-    packed_version, build = struct.unpack_from("<II", data, 72)
-    major = (packed_version >> 24) & 0xFF
-    minor = (packed_version >> 16) & 0xFF
-    api = (packed_version >> 8) & 0xFF
-    serial = packed_version & 0xFF
-    human_readable = data[8:72].split(b"\0", 1)[0].decode("ascii", errors="replace")
+    # In the modern TLV format, ver is not unconditionally the legacy
+    # major/minor/API/serial bitfield; Linux documents it as a single major
+    # version in the new format. Keep the raw value rather than mis-decoding it.
+    header_version, build = struct.unpack_from("<II", data, 72)
+    human_readable = data[8:72].split(b"\\0", 1)[0].decode("ascii", errors="replace")
 
     records: list[FirmwareTlv] = []
+    firmware_version_tlv: tuple[int, int, int] | None = None
     cursor = IWL_TLV_HEADER_BYTES
     while cursor < len(data):
         if len(records) >= IWL_MAX_TLV_RECORDS:
@@ -256,16 +258,21 @@ def inspect_iwl_tlv_firmware(data: bytes) -> FirmwareImageSummary:
         if padded_length > len(data) - payload_start:
             raise FirmwareFormatError("truncated Intel TLV alignment padding")
 
+        if type_id == 36:
+            if length != 12:
+                raise FirmwareFormatError("FW_VERSION TLV must contain exactly 12 bytes")
+            if firmware_version_tlv is not None:
+                raise FirmwareFormatError("duplicate FW_VERSION TLV")
+            firmware_version_tlv = struct.unpack_from("<III", data, payload_start)
+
         records.append(FirmwareTlv(type_id=type_id, length=length))
         cursor = payload_start + padded_length
 
     return FirmwareImageSummary(
         file_bytes=len(data),
         human_readable=human_readable,
-        major=major,
-        minor=minor,
-        api=api,
-        serial=serial,
+        header_version=header_version,
         build=build,
+        firmware_version_tlv=firmware_version_tlv,
         tlvs=tuple(records),
     )
