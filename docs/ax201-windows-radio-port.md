@@ -41,7 +41,9 @@ References:
 - Linux PCI match table: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/pcie/drv.c (search for `0xA0F0` and `0x7A70`).
 - Linux QuZ family parameters: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/cfg/22000.c
 - Linux AX210/SO family parameters: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/cfg/ax210.c
+- Linux RF-ID bit masks and type codes: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/iwl-csr.h and https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/iwl-config.h
 - Linux JF NVM configuration: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/cfg/rf-jf.c
+- A0F0/QuZ/JF RF-ID decoding example: https://www.mail-archive.com/bugs%40openbsd.org/msg22610.html
 - Linux firmware-name selection: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/iwl-drv.c
 - Public firmware inventory: https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware/+/refs/heads/main/intel/iwlwifi/
 - AX211 prototype's pinned SO/GF firmware and parser: https://github.com/21Suspect/AirDrop-for-Windows/blob/main/native/awdl/src/ax211.rs and https://github.com/21Suspect/AirDrop-for-Windows/blob/main/native/intel/iwl_firmware.h
@@ -79,7 +81,7 @@ This rules out treating a normal NDIS lightweight-filter driver or a user-mode A
 
 ### Gate A — establish the exact QuZ/JF target from public source
 
-**Partial completion:** a host-only module `dropwin/platform/intel_ax201.py` now parses the Lenovo's Windows PnP identifier, maps PCI device `A0F0` to the QuZ MAC profile, records the Linux-sourced timing/transport parameters, and resolves QuZ firmware filenames only when an RF variant (JF1/JF2 or HR1/HR2) is supplied. The module deliberately does not infer that RF variant from the PnP revision or the `D4.79` Windows firmware string.
+**Partial completion:** a host-only module `dropwin/platform/intel_ax201.py` now parses the Lenovo's Windows PnP identifier, maps PCI device `A0F0` to the QuZ MAC profile, records the Linux-sourced timing/transport parameters, and decodes a supplied Intel `CSR_HW_RFID` value using Linux's published type/step masks. It resolves QuZ firmware filenames only when the RF type decodes to JF1/JF2 or HR1/HR2. A documented RF-ID value `0x108110` decodes to JF1; this is a source example from a different A0F0 subsystem, **not a measurement from the Lenovo**. The module deliberately does not infer the RF variant from the Lenovo's PnP revision or the `D4.79` Windows firmware string.
 
 The same module has a bounded, read-only parser for the common 88-byte Intel TLV firmware header and aligned TLV record inventory. Its tests use synthetic byte fixtures; it has not yet been validated against an authentic QuZ image and does not verify signatures, semantic TLV compatibility, or device suitability.
 
