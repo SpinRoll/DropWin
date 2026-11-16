@@ -380,3 +380,16 @@ def test_quz_rx_completed_count_rejects_invalid_indices(host, firmware, size):
 
     with pytest.raises(ValueError):
         quz_rx_completed_count(host, firmware, queue_size=size)
+
+
+@pytest.mark.parametrize("size", [True, "512", None])
+def test_quz_rx_cursor_helpers_reject_non_integer_ring_size(size):
+    from dropwin.platform.intel_ax201_transport import (
+        quz_rx_completed_count,
+        quz_rx_restock_doorbell_pointer,
+    )
+
+    with pytest.raises(TypeError):
+        quz_rx_completed_count(0, 0, queue_size=size)
+    with pytest.raises(TypeError):
+        quz_rx_restock_doorbell_pointer(0, queue_size=size)
