@@ -84,6 +84,24 @@ The EU DMA interoperability work must not be interpreted as a ready-made way for
 
 Next research gate: compare the AX211 reference's documented hardware/firmware assumptions against the Lenovo AX201, without changing the user's driver or boot-security configuration. Until a technically safe AX201 path is demonstrated, DropWin must not claim this laptop can receive native AirDrop.
 
+
+## Deeper AirDrop interoperability findings — 2026-11-16
+
+A more relevant hardware result changes the assessment of the Lenovo AX201: the Linux project [omdrop-owl](https://github.com/esslm/airdrop-on-windows) lists Intel AX201 as tested and working in both directions using the in-kernel `iwlwifi` driver and OWL in **exclusive** mode. Its README names Ubuntu 24.04 / kernel 6.8 and CachyOS / kernel 7.2.9 as AX201 test environments, and reports approximately 17 seconds for a 2.4 MB iPhone-to-PC photo and 10.5 seconds in the reverse direction on the Intel profile. During exclusive mode the Intel Wi-Fi connection is taken over for AWDL; this is a Linux implementation, despite the repository's historical name. This is encouraging evidence that AX201-class hardware can support native AirDrop when driven through a suitable Linux radio stack. The public table does not disclose the tested AX201 machine's full PCI subsystem/revision, so the Lenovo 82A3 still needs its own validation.
+
+This does **not** provide a Windows driver or make Linux `iwlwifi` available to a normal Windows process. Windows' stock AX201 driver still reports Network Monitor and promiscuous modes unsupported on the user's machine. The Linux result instead suggests that the present blocker is not simply the AX201 radio silicon: it is the lack of an equivalent raw-radio/AWDL control path in the Windows driver stack.
+
+The native Windows project [21Suspect/AirDrop-for-Windows](https://github.com/21Suspect/AirDrop-for-Windows) proves that a Windows KMDF radio path plus Owly/AWDL can make a PC appear in Apple's native AirDrop sheet, but its preview is hard-limited to one exact AX211 device (`8086:7A70`, subsystem `00948086`, revision `11`). Its native driver and bundled firmware target the AX211 SO/GF platform. The Lenovo AX201 identifies as `8086:A0F0`; Linux/OpenBSD driver references identify this QuZ/JF platform and its separate `QuZ-a0-jf-b0` firmware. The AX211 driver's INF must not be forced onto this AX201. Supporting AX201 in native Windows would require a distinct, hardware-specific radio-driver/firmware port and real hardware validation, not a simple adapter-ID change.
+
+Other projects clarify the choices:
+- [Windfall](https://github.com/UvejsGj/Windfall) has a Windows protocol library and GUI, but its own README says Windows radio/AWDL access is still pending; its real iPhone transfers run on Linux with OWL.
+- [omdrop-owl-windows](https://github.com/dantdmdarealguy/omdrop-owl-windows) has a working native Windows AirDrop protocol path, but delegates raw radio to a USB ESP32. This violates this project's no-external-radio requirement.
+- Projects that use Wi-Fi Direct or a QR/web page provide an AirDrop-like transfer, not a PC that appears in the iPhone's native AirDrop recipient list.
+
+The European Commission's DMA close-range file-transfer measures are aimed at enabling third-party file-sharing solutions/apps on iOS as alternatives to AirDrop. They do not, by themselves, deliver a Windows AWDL receiver or guarantee that a PC registers in Apple's native AirDrop recipient sheet. See the [Commission's explanation and implementation timetable](https://digital-markets-act.ec.europa.eu/businesses-portal/interoperability/apple-specification-proceedings-interoperability-connected-devices-and-request-based-process_en).
+
+**Current conclusion:** the Lenovo's internal AX201 is a promising radio, with third-party Linux evidence of successful AirDrop. There is no ready, validated Windows-native AX201 solution found in this research. The technically direct DropWin path is a separate Windows radio implementation for the AX201 QuZ/JF platform, using Linux `iwlwifi`/OWL behavior and the AX211 Windows port as references. Keep Secure Boot, Kernel DMA Protection and the stock Windows driver unchanged until a reviewed design and safe test plan exist. A Linux boot on the same internal AX201 is a separate possible proof-of-hardware route, but it would not be DropWin running on Windows.
+
 - [OpenDrop](https://github.com/seemoo-lab/opendrop) — Python AirDrop protocol implementation; upstream documents macOS and Linux/AWDL requirements, not native Windows support.
 - [Open Wireless Link (OWL)](https://github.com/seemoo-lab/owl) — open AWDL implementation primarily for Linux.
 - [winawdl](https://github.com/raph559/winawdl) — research implementation currently documented for Realtek RTL8852CE only; it uses a custom radio driver and is not compatible by assumption with Intel AX201.
