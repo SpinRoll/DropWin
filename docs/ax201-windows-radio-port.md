@@ -31,7 +31,11 @@ Reference: https://github.com/esslm/airdrop-on-windows#supported-hardware
 
 Upstream Linux `iwlwifi/pcie/drv.c` maps PCI device `0xA0F0` to `iwl_qu_long_latency_mac_cfg`. It maps `0x7A70`, the tested AX211 in [21Suspect/AirDrop-for-Windows](https://github.com/21Suspect/AirDrop-for-Windows), to `iwl_so_long_latency_imr_mac_cfg`.
 
-The Linux firmware-name generator distinguishes MAC and RF families. For the AX201's expected QuZ/JF identity, the corresponding public firmware family is `iwlwifi-QuZ-a0-jf-b0-<API>.ucode`; the public linux-firmware tree contains a `-77` image. The AX211 Windows prototype instead pins `iwx-so-a0-gf-a0-77` plus its SO/GF PNVM. Matching the firmware API number does **not** make those device-family images interchangeable. Linux's `22000.c` marks QuZ as device family 22000 and `gen2=true`; `ax210.c` also marks SO as `gen2=true`, but as device family AX210. So the distinction should not be simplified to "Gen2 versus Gen3": the device-family configuration, MAC/RF identity, firmware, NVM/PNVM path, and hardware command/descriptor behavior must each be compared. Linux's JF RF config declares extended NVM (`IWL_NVM_EXT`) and NVM version 0x0a1d; do not assume the AX211 SO/GF PNVM workflow is the right AX201 initialization path. The physical radio revision and firmware selection still need to be confirmed from the actual AX201 before choosing an image.
+The Linux PCI table maps device ID `0xA0F0` to `iwl_qu_long_latency_mac_cfg`, which selects the QuZ MAC configuration (device family 22000, Gen2 transport, integrated radio, 12 ms XTAL latency and 2.5 ms LTR delay). The RF family is determined separately from the controller RF-ID: Linux's firmware-name resolver distinguishes JF1/JF2 from HR1/HR2 and constructs a different firmware name for each. The common QuZ/JF candidate is `iwlwifi-QuZ-a0-jf-b0-77.ucode`; a QuZ/HR identity would select `iwlwifi-QuZ-a0-hr-b0-77.ucode`. Both families have API 77 in the cited Linux sources.
+
+The Windows PnP string `REV_20` is not the controller's CSR hardware-revision register, and neither it nor the existing `netsh` report exposes the RF-ID. Therefore **the Lenovo's QuZ MAC mapping is confirmed by PCI device ID, but JF versus HR is still unconfirmed for this physical card**. The user's Windows-reported firmware string `D4.79` is not the Linux uCode version string and cannot be used to select or validate a `.ucode` image. The AX211 Windows prototype instead pins `iwx-so-a0-gf-a0-77` plus its SO/GF PNVM. Matching the API number does **not** make those device-family images interchangeable.
+
+Linux's `22000.c` marks QuZ as device family 22000 and `gen2=true`; `ax210.c` also marks SO as `gen2=true`, but as device family AX210. So the distinction should not be simplified to "Gen2 versus Gen3": the device-family configuration, MAC/RF identity, firmware, NVM/PNVM path, and hardware command/descriptor behavior must each be compared. Linux's JF RF config declares extended NVM (`IWL_NVM_EXT`) and NVM version 0x0a1d; do not assume the AX211 SO/GF PNVM workflow is the right AX201 initialization path.
 
 References:
 - Linux PCI match table: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/pcie/drv.c (search for `0xA0F0` and `0x7A70`).
@@ -75,9 +79,11 @@ This rules out treating a normal NDIS lightweight-filter driver or a user-mode A
 
 ### Gate A — establish the exact QuZ/JF target from public source
 
-Map the AX201's PCI ID, MAC/RF identity, firmware naming and supported firmware API to upstream Linux/OpenBSD references. Compare the QuZ command and RX/TX descriptor paths with the SO/GF paths in the Windows prototype. Record source provenance and licensing before deriving code.
+**Partial completion:** a host-only module `dropwin/platform/intel_ax201.py` now parses the Lenovo's Windows PnP identifier, maps PCI device `A0F0` to the QuZ MAC profile, records the Linux-sourced timing/transport parameters, and resolves QuZ firmware filenames only when an RF variant (JF1/JF2 or HR1/HR2) is supplied. The module deliberately does not infer that RF variant from the PnP revision or the `D4.79` Windows firmware string.
 
-No local device interaction is required for this stage.
+The same module has a bounded, read-only parser for the common 88-byte Intel TLV firmware header and aligned TLV record inventory. Its tests use synthetic byte fixtures; it has not yet been validated against an authentic QuZ image and does not verify signatures, semantic TLV compatibility, or device suitability.
+
+Remaining Gate A work: confirm the RF-ID masks/classification from authoritative source, map the exact AX201 QuZ/JF or QuZ/HR command and RX/TX descriptor differences, and record provenance/licensing before deriving code. No register access, firmware execution, DMA or radio I/O is part of this gate.
 
 ### Gate B — build host-only, non-hardware tests
 
