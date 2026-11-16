@@ -48,6 +48,22 @@ References:
 - Public firmware inventory: https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware/+/refs/heads/main/intel/iwlwifi/
 - AX211 prototype's pinned SO/GF firmware and parser: https://github.com/21Suspect/AirDrop-for-Windows/blob/main/native/awdl/src/ax211.rs and https://github.com/21Suspect/AirDrop-for-Windows/blob/main/native/intel/iwl_firmware.h
 
+### QuZ firmware selection has an independent OpenBSD reference
+
+OpenBSD's `if_iwxvar.h` lists the QuZ-A0 firmware names separately for HR and JF:
+- `iwx-QuZ-a0-hr-b0-77`
+- `iwx-QuZ-a0-jf-b0-77`
+
+Its `if_iwx.c` device-information table selects the QuZ/JF configuration based on the decoded MAC/RF type, independently confirming that PCI device ID alone does not settle JF versus HR. OpenBSD's QuZ entries use a `iwx_9560_quz_a0_jf_b0_cfg` / corresponding HR config rather than the SO/GF AX211 config.
+
+The current Linux `cfg/22000.c` likewise declares QuZ HR/JF `.ucode` firmware names through API 77, but does not declare a QuZ PNVM companion in the way `cfg/ax210.c` declares SO/GF PNVM images. OpenBSD's firmware constants also list PNVM companions for selected SO/GF and Ty/GF families, but not QuZ. This is strong source evidence that the AX211 prototype's SO/GF PNVM staging should **not** be copied into the AX201 QuZ path. The actual QuZ NVM initialization sequence still needs to be mapped and implemented from the QuZ-specific source before any firmware execution.
+
+Sources:
+- OpenBSD QuZ/JF/HR hardware selection: https://github.com/openbsd/src/blob/master/sys/dev/pci/if_iwx.c
+- OpenBSD firmware names and device configurations: https://github.com/openbsd/src/blob/master/sys/dev/pci/if_iwxvar.h
+- OpenBSD QuZ MAC/RF register identifiers: https://github.com/openbsd/src/blob/master/sys/dev/pci/if_iwxreg.h
+- Linux QuZ MAC-family firmware declarations: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/cfg/22000.c
+
 ### 3. QuZ queue parameters are not the AX211/SO queue parameters
 
 Linux `cfg/22000.c` sets the QuZ base `max_tfd_queue_size` to **256**. Linux `cfg/ax210.c`, used for the SO/AX211 family, sets it to **65,536**. Linux `pcie/tx-gen2.c` uses this value as a power-of-two wrap mask in queue-space accounting, so it affects real queue-counter behavior and cannot be treated as a cosmetic constant. The AX201 host profile now records the QuZ value of 256.
