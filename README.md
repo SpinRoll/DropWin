@@ -127,3 +127,7 @@ This project is currently marked as **GPL-3.0-or-later** to align with the inten
 ## Disclaimer
 
 DropWin is an independent community project and is not affiliated with, endorsed by, or sponsored by Apple Inc. AirDrop and Apple are trademarks of Apple Inc.
+
+## AX201 Gen2 descriptor research
+
+A host-only Python module now serializes the generic Intel Gen2/TFH TX descriptor and RX transfer descriptor layouts and tests QuZ's 256-step TX write-pointer arithmetic. This is offline format work only: DropWin does not allocate DMA, write device registers, load firmware, or transmit/receive radio frames. The QuZ RX queue lifecycle and a validated Windows radio backend remain unimplemented. See [the AX201 engineering notes](docs/ax201-windows-radio-port.md).
