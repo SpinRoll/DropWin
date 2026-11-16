@@ -268,3 +268,73 @@ def test_gen2_tx_doorbell_rejects_invalid_fields(queue_id, write_pointer) -> Non
             queue_id=queue_id,
             write_pointer=write_pointer,
         )
+
+
+def test_quz_rx_ledger_tracks_reuse_and_stolen_page_lifecycles() -> None:
+    from dropwin.platform.intel_ax201_transport import QuzRxBufferLedger
+
+    ledger = QuzRxBufferLedger(pool_size=8)
+    ledger.post(1)
+    ledger.complete(1)
+    ledger.recycle_unstolen(1)
+    assert ledger.state(1) == ledger.FREE
+
+    ledger.post(2)
+    ledger.complete(2)
+    ledger.mark_page_stolen(2)
+    ledger.release_to_allocator(2)
+    ledger.mark_allocator_page_ready(2)
+    ledger.publish_replacement(2)
+    assert ledger.state(2) == ledger.FREE
+
+    assert ledger.counts() == {
+        ledger.FREE: 8,
+        ledger.POSTED: 0,
+        ledger.COMPLETED: 0,
+        ledger.USED: 0,
+        ledger.ALLOCATOR_EMPTY: 0,
+        ledger.ALLOCATOR_ALLOCATED: 0,
+    }
+
+
+@pytest.mark.parametrize(
+    ("operation", "vid"),
+    [
+        ("complete", 1),
+        ("recycle_unstolen", 1),
+        ("mark_page_stolen", 1),
+        ("release_to_allocator", 1),
+        ("mark_allocator_page_ready", 1),
+        ("publish_replacement", 1),
+    ],
+)
+def test_quz_rx_ledger_rejects_invalid_or_duplicate_transitions(
+    operation, vid
+) -> None:
+    from dropwin.platform.intel_ax201_transport import QuzRxBufferLedger
+
+    ledger = QuzRxBufferLedger(pool_size=8)
+    with pytest.raises(ValueError):
+        getattr(ledger, operation)(vid)
+
+
+def test_quz_rx_ledger_rejects_duplicate_completion_and_foreign_vid() -> None:
+    from dropwin.platform.intel_ax201_transport import QuzRxBufferLedger
+
+    ledger = QuzRxBufferLedger(pool_size=8)
+    ledger.post(1)
+    ledger.complete(1)
+    with pytest.raises(ValueError, match="expected posted"):
+        ledger.complete(1)
+    with pytest.raises(ValueError, match="outside"):
+        ledger.post(9)
+    with pytest.raises(TypeError):
+        ledger.post(True)
+
+
+@pytest.mark.parametrize("pool_size", [1, 2049, True, "512"])
+def test_quz_rx_ledger_rejects_invalid_pool_size(pool_size) -> None:
+    from dropwin.platform.intel_ax201_transport import QuzRxBufferLedger
+
+    with pytest.raises((TypeError, ValueError)):
+        QuzRxBufferLedger(pool_size=pool_size)
