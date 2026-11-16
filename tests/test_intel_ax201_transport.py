@@ -28,7 +28,7 @@ def test_tfh_tfd_is_256_bytes_and_little_endian() -> None:
 
     assert len(result) == IWL_TFH_TFD_BYTES == 256
     assert result[:2] == b"\x01\x00"
-    assert result[2:12] == struct.pack("<HQ", 0x123, 0x1122334455667788)
+    assert result[2:12] == struct.pack("<HQ", 0x123, 0x122334455)
     assert result[12:-4] == bytes((IWL_TFH_NUM_TBS - 1) * 10)
     assert result[-4:] == b"\0" * 4
 
