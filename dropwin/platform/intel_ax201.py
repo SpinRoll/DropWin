@@ -238,7 +238,7 @@ def inspect_iwl_tlv_firmware(data: bytes) -> FirmwareImageSummary:
     # major/minor/API/serial bitfield; Linux documents it as a single major
     # version in the new format. Keep the raw value rather than mis-decoding it.
     header_version, build = struct.unpack_from("<II", data, 72)
-    human_readable = data[8:72].split(b"\\0", 1)[0].decode("ascii", errors="replace")
+    human_readable = data[8:72].split(b"\0", 1)[0].decode("ascii", errors="replace")
 
     records: list[FirmwareTlv] = []
     firmware_version_tlv: tuple[int, int, int] | None = None
