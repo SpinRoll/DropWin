@@ -74,6 +74,8 @@ class IntelRadioProfile:
     device_family: int
     gen2_transport: bool
     integrated_radio: bool
+    num_of_queues: int
+    max_tfd_queue_size: int
     xtal_latency_us: int
     ltr_delay_us: int
     low_latency_xtal: bool
@@ -95,8 +97,9 @@ def identify_intel_radio(pnp_id: str) -> IntelRadioProfile | None:
         return None
 
     # Source: Linux iwlwifi pcie/drv.c + cfg/22000.c.
-    # QuZ has the 22000 device family and Gen2 transport. These values describe
-    # the MAC configuration only; they do not identify the RF variant.
+    # QuZ has device family 22000 and Gen2 transport. Its Linux base config
+    # uses 512 queues and 256 TFD descriptors; AX210/SO has different base
+    # queue parameters. These values do not identify the RF variant.
     exact_target = (
         identity.subsystem_device_id == 0x0074
         and identity.subsystem_vendor_id == INTEL_VENDOR_ID
@@ -108,6 +111,8 @@ def identify_intel_radio(pnp_id: str) -> IntelRadioProfile | None:
         device_family=22000,
         gen2_transport=True,
         integrated_radio=True,
+        num_of_queues=512,
+        max_tfd_queue_size=256,
         xtal_latency_us=12000,
         ltr_delay_us=2500,
         low_latency_xtal=True,
