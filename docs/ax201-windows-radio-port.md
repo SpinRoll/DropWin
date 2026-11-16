@@ -224,8 +224,9 @@ Linux's RX comments describe a shared host/firmware buffer lifecycle with read/w
 | Gen2 TX TFD field layout | 256-byte packed TFD, 25 possible TB entries; common layout is plausible | Reuse only a tested serializer/layout definition |
 | Physical TX TFD ring | 256 slots documented for 22000+ hardware | Candidate baseline; verify QuZ queue configuration |
 | Logical TX counter | QuZ modulus 256; AX211 reference uses a 16-bit sequence/doorbell | **Do not reuse AX211 counter/doorbell logic** |
-| RX transfer descriptor | Same 16-byte field layout | Reuse candidate with explicit little-endian encoding |
-| RX ring depth/buffer ownership | AX211 uses 512 × 4 KiB; QuZ policy not yet established | Keep unresolved |
+| RX free-buffer descriptor | QuZ pre-AX210 uses 8-byte address/VID word; AX210+ uses 16-byte transfer descriptor | QuZ-specific 8-byte encoder added; AX210 format explicitly excluded |
+| RX ring depth | Linux QuZ config documents 512 RBDs without HE and 2048 with HE | Pure mode-dependent size helper added; active Lenovo RF/firmware mode still unverified |
+| RX queue ownership/refill | Free/used rings, completion processing and buffer allocator lifecycle | Not implemented; requires separate state-machine mapping |
 | TX command/notification API | AX211 reference pins command v10 / notification v7 | Verify against QuZ firmware/API before reuse |
 | Firmware boot, NVM, DMA and IRQ sequence | Hardware-family-specific | No reuse without QuZ-specific source map and review |
 
@@ -251,16 +252,19 @@ Linux's RX comments describe a shared host/firmware buffer lifecycle with read/w
 
 - A TFH TFD is serialized to exactly 256 bytes: a little-endian 16-bit buffer count, 25 packed 10-byte entries (`u16 length + u64 address`), and a zeroed 32-bit pad. The serializer checks 1–25 segments, each no larger than 4 KiB minus 4 bytes, a combined frame limit of 8 KiB, and the QuZ TX DMA mask of 36 bits (the descriptor's address field is 64 bits wide, but that is not the hardware DMA aperture).
 - **Correction to the initial RX prototype:** QuZ is device family 22000, which is earlier than AX210 in Linux's device-family ordering. Linux's PCIe RX code therefore uses the legacy 8-byte `u64` RBD for QuZ, packing the 12-bit virtual buffer ID into the low address bits (`page_dma | vid`); the 16-byte `iwl_rx_transfer_desc` applies to AX210 and later, not QuZ. The earlier 16-byte AX210-shaped serializer has been removed. The QuZ encoder now requires a nonzero 12-bit buffer ID and a 4-KiB-aligned 64-bit DMA address.
+
+- The QuZ RX ring count is mode-dependent in Linux's family configuration: 512 RBDs for non-HE and 2048 for HE. DropWin now models this as an explicit caller-supplied boolean, rather than guessing the Lenovo's active firmware/RF mode. The ring arithmetic helper follows Linux's one-empty-slot rule, `(read - write - 1) & (size - 1)`; VID validation is separately bounded against the caller-selected pool size. These helpers do not implement the free/used queue ownership state machine, completions, or refill.
 - QuZ has multi-queue RX enabled. For pre-AX210 families, Linux stores each RX free-buffer descriptor as an 8-byte address/VID word and reads each used/completion entry as a 32-bit word whose low 12 bits are the VID. The code now has a bounded extractor for that VID; the caller must still validate it against the selected RX pool and ownership state. QuZ's RX queue depth differs across firmware/RF configurations (for example, the current Linux JF and HR configurations need separate confirmation), so it remains deliberately unresolved while the Lenovo's JF/HR RF identity is unknown. Completion/status semantics, buffer ownership, refill and teardown remain unimplemented.
 - The QuZ TX write counter advances with a 256-entry power-of-two mask. A helper reports the modular read/write distance, with the documented one-slot-empty discipline (at most 255 pending descriptors).
 - A pure helper encodes QuZ's pre-AX210 scheduler byte-count table entry: TX byte count rounded up to 32-bit words in the low 12 bits, plus the TFD fetch-chunk count derived from the populated TFD prefix in the upper bits. It returns two bytes only; it never writes the scheduler table.
 - A separate helper constructs the Gen2 `HBUS_TARG_WRPTR` value from a queue ID and write pointer. It returns an integer only; it never writes a register.
 
-The layout is cross-referenced against Linux `iwl-fh.h` (TFH TFD/TB and 22000 ring constants), `pcie/tx-gen2.c` (write-pointer doorbell), `pcie/rx.c` (QuZ/AX210 RBD-format split and 12-bit VID), and `iwl-config.h` (family ordering). QuZ RX completion VID extraction follows `pcie/rx.c`. See:
+The layout is cross-referenced against Linux `iwl-fh.h` (TFH TFD/TB and 22000 ring constants), `pcie/tx-gen2.c` (write-pointer doorbell), `pcie/rx.c` (QuZ/AX210 RBD-format split and 12-bit VID), and `iwl-config.h` (family ordering). QuZ RX completion VID extraction, RX ring sizes and free-slot arithmetic follow `pcie/rx.c` and the QuZ family configuration in `cfg/22000.c`. See:
 - https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/iwl-fh.h
 - https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/pcie/tx-gen2.c (TFD pointer wrap and doorbell)
 - https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/queue/tx.c (pre-AX210 byte-count table entry construction)
 - https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/pcie/rx.c
+- https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/cfg/22000.c
 - https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/iwl-config.h
 
 **Strict boundary:** these serializers operate only on caller-supplied integers and Python objects. They do not allocate/map DMA, choose a DMA mask, create queue memory, populate the TX byte-count table, configure interrupt handling, post descriptors, write a doorbell, or start firmware. The full QuZ RX ring/completion/status lifecycle and its parameters remain unimplemented. AX211 queue/session code is not copied. Synthetic tests verify byte layout and bounds only; no physical adapter validation or AWDL capability is claimed.
