@@ -23,7 +23,7 @@ from dropwin.platform.intel_ax201_transport import (
 
 def test_tfh_tfd_is_256_bytes_and_little_endian() -> None:
     result = encode_iwl_tfh_tfd(
-        [TxBuffer(dma_address=0x1122334455667788, length=0x123)]
+        [TxBuffer(dma_address=0x122334455, length=0x123)]
     )
 
     assert len(result) == IWL_TFH_TFD_BYTES == 256
@@ -67,7 +67,7 @@ def test_tfh_tfd_rejects_frames_over_8kib() -> None:
         )
 
 
-@pytest.mark.parametrize("address", [-1, 1 << 64])
+@pytest.mark.parametrize("address", [-1, 1 << 36, 1 << 64])
 def test_tfh_tfd_rejects_out_of_range_dma_address(address: int) -> None:
     with pytest.raises(ValueError, match="DMA address"):
         encode_iwl_tfh_tfd([TxBuffer(address, 1)])
@@ -181,14 +181,14 @@ def test_quz_tx_byte_count_entry_rejects_invalid_values(
 
 
 def test_gen2_tx_doorbell_value_is_only_a_packed_integer() -> None:
-    assert encode_gen2_tx_doorbell_value(queue_id=3, write_pointer=0xA5) == (
-        (3 << 16) | 0xA5
+    assert encode_gen2_tx_doorbell_value(queue_id=511, write_pointer=0xA5) == (
+        (511 << 16) | 0xA5
     )
 
 
 @pytest.mark.parametrize(
     ("queue_id", "write_pointer"),
-    [(-1, 0), (64, 0), (0, -1), (0, 256), (True, 0)],
+    [(-1, 0), (512, 0), (0, -1), (0, 256), (True, 0)],
 )
 def test_gen2_tx_doorbell_rejects_invalid_fields(queue_id, write_pointer) -> None:
     with pytest.raises((TypeError, ValueError)):
