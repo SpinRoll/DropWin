@@ -156,13 +156,13 @@ def quz_rx_queue_space(read_pointer: int, write_pointer: int, *, queue_size: int
 
 
 def validate_quz_rx_vid(*, vid: int, pool_size: int) -> int:
-    """Validate a decoded VID against a caller-selected RX buffer pool."""
+    """Validate a decoded VID in the inclusive range 1..pool_size."""
     if isinstance(pool_size, bool) or not isinstance(pool_size, int):
         raise TypeError("RX pool size must be an integer")
     if not 1 <= pool_size <= QUZ_RX_QUEUE_SIZE_HE:
         raise ValueError("QuZ RX pool size must be between 1 and 2048")
     _require_uint(vid, bits=12, field="QuZ RX buffer ID")
-    if not 1 <= vid < pool_size:
+    if not 1 <= vid <= pool_size:
         raise ValueError("QuZ RX buffer ID is outside the selected pool")
     return vid
 
