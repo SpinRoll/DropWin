@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dropwin"
+version = "0.1.0"
+description = "Experimental Windows desktop shell for native AirDrop receiving research"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "DropWin contributors" }]
+dependencies = ["PySide6>=6.7,<7"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.5"]
+build = ["pyinstaller>=6.8"]
+
+[project.scripts]
+dropwin = "dropwin.app.main:main"
+
+[tool.setuptools.packages.find]
+include = ["dropwin*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
