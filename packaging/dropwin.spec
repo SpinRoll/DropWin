@@ -1,11 +1,14 @@
 # Build on Windows: pyinstaller --noconfirm --clean packaging/dropwin.spec
-from PyInstaller.utils.hooks import collect_submodules
-
-hiddenimports = collect_submodules("PySide6")
+# Paths in a spec file are resolved relative to this file's directory.
+hiddenimports = [
+    "PySide6.QtCore",
+    "PySide6.QtGui",
+    "PySide6.QtWidgets",
+]
 
 a = Analysis(
-    ["dropwin/__main__.py"],
-    pathex=["."],
+    ["../dropwin/__main__.py"],
+    pathex=[".."],
     binaries=[],
     datas=[],
     hiddenimports=hiddenimports,
