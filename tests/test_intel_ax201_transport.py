@@ -12,6 +12,7 @@ from dropwin.platform.intel_ax201_transport import (
     QUZ_MAX_PENDING_TFDS,
     TxBuffer,
     encode_gen2_tx_doorbell_value,
+    encode_quz_rx_buffer_descriptor,
     encode_iwl_tfh_tfd,
     quz_tx_pending_count,
     quz_tx_queue_advance,
