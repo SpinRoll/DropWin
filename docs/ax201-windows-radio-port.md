@@ -144,3 +144,32 @@ Only after Gates A–D pass: confirm stock-driver backup and recovery design, in
 The best current path is **a purpose-built Windows QuZ/JF radio backend for the existing AX201**, reusing DropWin's AirDrop protocol/application layers and studying Linux `iwlwifi`/OWL for AX201 behavior. This is substantially more promising than the earlier assumption that the AX201 hardware itself was unsuitable. It is still a driver-porting project, not a ready-made download or a guaranteed result.
 
 The immediate next engineering task is Gate A: produce a source-backed QuZ/JF hardware/firmware/command map. Do not change anything on the user's laptop while doing so.
+
+
+## Confirmed Lenovo Windows capability report — 2026-11-16
+
+DropWin's read-only diagnostics were run on the target Lenovo Yoga Slim 7 14ITL05 with the exact AX201 PnP identifier:
+
+`PCI\\VEN_8086&DEV_A0F0&SUBSYS_00748086&REV_20`
+
+The report confirms the existing host-side classifier identifies the adapter as Intel QuZ / device family 22000. It reports the following from the installed Intel driver 24.80.0.2 (INF `oem227.inf`) and Windows WLAN capability query:
+
+| Windows-reported capability | Observed result |
+|---|---|
+| Network Monitor mode | Not supported |
+| Promiscuous mode | Not supported |
+| IBSS | Not supported |
+| Action frames | Supported |
+| Wi-Fi Direct device / P2P discovery | Supported |
+| Simultaneous channels | 0 |
+| Firmware string reported by Windows | D4.79 |
+| WDI (Windows / IHV) | 0.1.1.13 / 0.1.1.12 |
+| WiFiCx | Not supported |
+
+The report also returns antenna count, maximum simultaneous channel count at the system level, and coexistence information as unavailable/unknown. Those missing values must be treated as **not reported**, not as proof that the physical adapter has zero antennas or no radio.
+
+This real-device report strengthens the existing conclusion about the stock Windows miniport: it does not advertise Network Monitor, promiscuous, or IBSS operation, and reports no simultaneous-channel capability. The positive Action-frame and Wi-Fi Direct results do not establish arbitrary raw 802.11 MPDU access, AWDL, or AirDrop interoperability. In particular, Wi-Fi Direct discovery is not AWDL peer discovery.
+
+The output is consistent with the documented Linux AX201 QuZ mapping and the host-only parser. It does not identify the controller RF-ID, so JF versus HR remains unresolved. The Windows firmware label `D4.79` is recorded as an observation only; it must not be translated into an Intel Linux uCode filename or used to infer the RF family.
+
+**Engineering consequence:** do not spend effort trying to enable AWDL through a Windows WLAN setting or by toggling an NDIS filter over this stock miniport. Continue the offline, source-based QuZ hardware/firmware/descriptor map. Any future custom radio path is a separate driver-development effort and remains gated on an independently reviewed design and a viable signed deployment route. The user's stock Intel driver, Secure Boot, and Kernel DMA Protection remain unchanged.
