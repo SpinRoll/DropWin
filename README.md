@@ -44,6 +44,13 @@ pyinstaller --noconfirm --clean packaging/dropwin.spec
 
 GitHub Actions builds a Windows x64 executable on pushes and pull requests. The build is a desktop-shell prototype, **not** an AirDrop-capable release.
 
+
+## AX201 host-only research component
+
+The first AX201-specific host-side module, `dropwin/platform/intel_ax201.py`, parses the Windows PCI PnP ID for the Lenovo's AX201 and maps PCI device `A0F0` to the Linux QuZ MAC configuration. It keeps the RF family unresolved until a separately verified controller RF-ID is available, then can resolve the corresponding QuZ/JF or QuZ/HR firmware filename. It also inventories the common Intel TLV firmware header and record boundaries from bytes supplied by a caller.
+
+This module is an offline parser/classifier only. It does not query PCI registers, load firmware, install or replace drivers, allocate DMA, reset the adapter, or transmit/receive radio frames. Synthetic parser tests do not prove compatibility with a real firmware image. See [the AX201 Windows radio plan](docs/ax201-windows-radio-port.md).
+
 ## Hardware research target
 
 The initial development machine reported:
