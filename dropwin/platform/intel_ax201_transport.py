@@ -14,6 +14,8 @@ IWL_TFH_MAX_TB_BYTES = 4 * 1024 - 4
 IWL_TFH_MAX_FRAME_BYTES = 8 * 1024
 QUZ_NUM_OF_QUEUES = 512
 QUZ_TX_DMA_ADDRESS_BITS = 36
+QUZ_RX_QUEUE_SIZE_NON_HE = 512
+QUZ_RX_QUEUE_SIZE_HE = 2048
 
 
 @dataclass(frozen=True)
@@ -108,6 +110,60 @@ def extract_quz_rx_completion_vid(completion_word: int) -> int:
     vid = completion_word & 0x0FFF
     if vid == 0:
         raise ValueError("QuZ RX completion contains the invalid zero VID")
+    return vid
+
+
+
+def quz_rx_queue_size(*, he_enabled: bool) -> int:
+    """Return the Linux-documented QuZ RX RBD count for the PHY mode.
+
+    The QuZ family configuration uses 512 RBDs without HE and 2048 with HE.
+    This is a family-level reference, not proof of the active firmware's
+    negotiated mode or the Lenovo module's RF-specific configuration.
+    """
+    if not isinstance(he_enabled, bool):
+        raise TypeError("HE-enabled flag must be a bool")
+    return QUZ_RX_QUEUE_SIZE_HE if he_enabled else QUZ_RX_QUEUE_SIZE_NON_HE
+
+
+def quz_rx_queue_advance(pointer: int, *, queue_size: int) -> int:
+    """Advance an RX ring index using a validated power-of-two ring size."""
+    if isinstance(queue_size, bool) or not isinstance(queue_size, int):
+        raise TypeError("RX queue size must be an integer")
+    if queue_size not in (QUZ_RX_QUEUE_SIZE_NON_HE, QUZ_RX_QUEUE_SIZE_HE):
+        raise ValueError("QuZ RX queue size must be 512 or 2048 entries")
+    _require_uint(pointer, bits=16, field="QuZ RX queue pointer")
+    if pointer >= queue_size:
+        raise ValueError("QuZ RX queue pointer must be smaller than queue size")
+    return (pointer + 1) & (queue_size - 1)
+
+
+def quz_rx_queue_space(read_pointer: int, write_pointer: int, *, queue_size: int) -> int:
+    """Return available RX free-ring slots, keeping one slot empty.
+
+    Follows Linux iwl_rxq_space(): (read - write - 1) & (queue_size - 1).
+    Pointers and queue size are indices/counts only; this does not post RBDs.
+    """
+    if isinstance(queue_size, bool) or not isinstance(queue_size, int):
+        raise TypeError("RX queue size must be an integer")
+    if queue_size not in (QUZ_RX_QUEUE_SIZE_NON_HE, QUZ_RX_QUEUE_SIZE_HE):
+        raise ValueError("QuZ RX queue size must be 512 or 2048 entries")
+    for name, pointer in (("read", read_pointer), ("write", write_pointer)):
+        _require_uint(pointer, bits=16, field=f"QuZ RX {name} pointer")
+        if pointer >= queue_size:
+            raise ValueError(f"QuZ RX {name} pointer must be smaller than queue size")
+    return (read_pointer - write_pointer - 1) & (queue_size - 1)
+
+
+def validate_quz_rx_vid(*, vid: int, pool_size: int) -> int:
+    """Validate a decoded VID against a caller-selected RX buffer pool."""
+    if isinstance(pool_size, bool) or not isinstance(pool_size, int):
+        raise TypeError("RX pool size must be an integer")
+    if not 1 <= pool_size <= QUZ_RX_QUEUE_SIZE_HE:
+        raise ValueError("QuZ RX pool size must be between 1 and 2048")
+    _require_uint(vid, bits=12, field="QuZ RX buffer ID")
+    if not 1 <= vid < pool_size:
+        raise ValueError("QuZ RX buffer ID is outside the selected pool")
     return vid
 
 
