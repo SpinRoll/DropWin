@@ -322,3 +322,101 @@ Primary sources:
 - `iwl-drv.c` RF-type firmware-name selection: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/iwl-drv.c
 
 This source map is documentation only. It does not implement completion-ring allocation, shared status memory, global VID table allocation, DMA, RFH programming, firmware boot, interrupt delivery, or teardown.
+
+
+## QuZ firmware/NVM, RX lifecycle, interrupts and Windows driver design — 2026-11-16
+
+This section records a first source-level reconstruction against upstream Linux `iwlwifi`. It is a design map, not a port of the Linux driver. No device I/O or hardware validation is implied.
+
+### 1. Firmware identity and initialization boundary
+
+The A0F0 PCI match selects the QuZ MAC configuration. The firmware prefix is not selected from the PCI ID alone: `iwl_drv_get_fwname_pre()` combines the MAC revision family with the controller RF-ID type. For QuZ it fixes the MAC portion to `QuZ-a0`; RF types JF1/JF2 select `jf-b0`, and HR1/HR2 select `hr-b0`. The QuZ family base in `cfg/22000.c` constrains the firmware API to 77, so the candidate names are:
+
+- `iwlwifi-QuZ-a0-jf-b0-77.ucode`
+- `iwlwifi-QuZ-a0-hr-b0-77.ucode`
+
+The effective API interval is calculated from the MAC-family and RF configuration ranges; do not infer it from the filename or from Windows' `D4.79` label. The Linux request path computes the firmware prefix only after it has a hardware RF-ID and chooses an API within the intersected supported range. The firmware is a TLV container; the parser inventories sections and the driver then follows its init/runtime firmware lifecycle. DropWin's current TLV parser is only a bounded offline container inventory: it does not verify signatures, validate every section semantic, or establish that a binary is suitable for this Lenovo.
+
+**NVM is a later firmware-command stage, not a substitute for RF-ID.** The Linux MVM NVM path reads NVM sections through `NVM_ACCESS_CMD` after firmware command transport is available. It requests section/offset/length chunks, checks response length, status and returned offset, and accumulates the sections used by the driver (hardware, software, calibration, production, PHY SKU and regulatory data where present). The JF RF configuration declares extended NVM, version `0x0a1d`, and API 77. The QuZ HR filename is also declared by the QuZ MAC family; its effective API must be resolved through the MAC/RF range intersection, not by copying the newer BZ/SC HR API-100 configuration. No QuZ PNVM companion is declared alongside the QuZ firmware in the cited Linux/OpenBSD inventories; do not stage the AX211 SO/GF PNVM flow on this path.
+
+**Still open for Gate A/B:** pin the exact QuZ API-77 init/runtime section requirements and command/notification version table; map the complete QuZ startup order from PCI ownership/interrupt setup through firmware ALIVE, NVM read, runtime configuration and RF bring-up; verify the TLV parser against a lawfully sourced, hash-pinned QuZ/JF or QuZ/HR image without executing it. The NVM command source is generic MVM code; the precise QuZ command-version compatibility must be cross-checked against API 77 before any implementation.
+
+Sources:
+- Linux QuZ MAC/API 77 and JF/HR firmware prefixes: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/cfg/22000.c
+- Linux JF API 77, NVM version 0x0a1d and extended-NVM declaration: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/cfg/rf-jf.c
+- Linux RF-ID-dependent firmware prefix and MAC/RF API intersection: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/iwl-drv.c
+- Linux RF-ID type codes: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/iwl-config.h
+- Linux NVM_ACCESS read/chunk validation and section collection: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/mvm/nvm.c
+- Linux CSR RF-ID masks: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/iwl-csr.h
+
+### 2. QuZ multi-queue RX: source-derived lifecycle
+
+The Linux source separates five things that must not be collapsed into one “RX ring”:
+
+1. **Free RBD ring per RX queue:** QuZ is pre-AX210, so each free descriptor is an 8-byte little-endian `page_dma | VID` word. The low 12 bits carry a nonzero virtual buffer ID; the DMA address must leave those low bits available.
+2. **Used/completion ring per RX queue:** firmware returns completion entries containing the VID. The host validates the VID against the separately sized buffer pool and resolves it through `global_table[vid - 1]`.
+3. **RX status memory:** per-queue status/write-pointer state tells the host where firmware has completed work. Linux allocates a contiguous coherent status area for all configured RX queues.
+4. **VID pool and global table:** the buffer pool size is derived from the configured number of RX buffers plus allocator reserve; it is not the same quantity as the free-ring depth. VID zero is reserved.
+5. **Allocator/refill lists:** Linux keeps buffers in queue free/used lists and allocator empty/allocated lists. Page reuse and page replacement are distinct paths; replacement may be batched and performed asynchronously.
+
+The initialization path allocates per-queue DMA rings and the contiguous status area, creates the RX pool and VID lookup table, zeros host cursors/status, initializes NAPI for each RX queue, assigns VIDs, and partitions buffers between the default queue and allocator reserve. For multi-queue devices, the RFH setup then supplies each queue's free-ring base, used-ring base and status address, resets the hardware indices, configures buffer size and enables the relevant RX queues. The initial host restock publishes free descriptors and advances the write pointer in groups of eight.
+
+The receive path reads the firmware status cursor, executes a DMA read barrier before consuming completion descriptors and packet buffers, then processes entries up to that cursor and within the NAPI budget. The VID lookup/ownership checks prevent accepting unknown or already-invalid buffers. The NAPI poll path reenables or clears the corresponding interrupt after polling completes; the MSI-X path maps a queue to its vector, with a special shared-vector case.
+
+The teardown source exposes two separate quiescence conditions:
+
+- For QuZ multi-queue RX, `iwl_pcie_rx_stop()` disables `RFH_RXF_DMA_CFG` and polls `RXF_DMA_IDLE` with a 1000-unit timeout.
+- The Gen2 PCIe stop path separately requests bus-master stop through `CSR_RESET` for pre-BZ devices and polls `MASTER_DISABLED` (100 microseconds in the Linux helper). Linux warns if that bus-master stop poll times out. A Windows implementation must be stricter: a timeout is a hard failure, DMA-backed memory must remain quarantined, and teardown must not free pages/rings while the device may still access them.
+- NAPI synchronization is explicit (`napi_synchronize` for every RX queue) before the associated processing context is retired; coherent status and per-queue DMA memory, pool tables and pages are freed in the later cleanup path.
+
+The source map is now sufficient to specify the objects and ordering constraints, but not to implement them safely. In particular, DropWin still has no allocator, DMA mapping, status memory, used-ring memory, interrupt/DPC path, hardware quiescence, or teardown implementation. Its `QuzRxBufferLedger` remains a synthetic model, not a faithful allocator or concurrency model.
+
+Sources:
+- QuZ RX allocation, initialization, completion handling, NAPI synchronization, stop and free: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/pcie/rx.c
+- QuZ RX ring sizes and MAC/RX configuration: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/cfg/22000.c
+- QuZ Gen2 bus-master stop and reset path: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/pcie/trans-gen2.c
+- PCIe interrupt handling and vector setup: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/pcie/trans.c
+- QuZ RX structures and DMA ring fields: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/pcie/internal.h
+
+### 3. TX, interrupts and DMA: current boundary
+
+The TX research currently establishes the 256-byte Gen2 TFD serialization, the QuZ 36-bit DMA aperture, the byte-count table encoding, and the QuZ 256-value logical queue-counter wrap. It does not yet reconstruct TX queue-context allocation, scheduler setup, command-specific API-77 payloads, completion/read-pointer updates, interrupt-to-completion association, timeout recovery or queue teardown. RX and TX both depend on DMA ordering, but the RX `dma_rmb()` observation is not a substitute for a complete TX memory-ordering design. No DMA allocation or mapping API is implemented.
+
+Interrupts are not a single callback: Linux has an ISR path that reads/acknowledges interrupt causes (ICT or direct status), masks/filters causes under an IRQ lock, then hands RX work to per-queue NAPI pollers; NAPI uses a budget and only restores interrupt service when polling completes. A Windows design needs an equivalent bounded split between the interrupt service routine and deferred processing, with per-queue synchronization, cancellation on power transitions, and a guarantee that no DPC/work item can touch freed DMA memory. This remains design work, not implemented code.
+
+### 4. JF/HR classification: source validation, device still unknown
+
+The RF-ID type values in Linux `iwl-config.h` match the existing offline classifier:
+- JF2 = `0x105`
+- JF1 = `0x108`
+- HR2 = `0x10A`
+- HR1 = `0x10C`
+
+Linux extracts the type with `(rf_id & 0x0FFF000) >> 12` and the RF step with `(rf_id & 0x0000F00) >> 8`. The classifier's mapping is therefore source-aligned. This validates the parser's mapping, **not the Lenovo's identity**: no actual `CSR_HW_RFID` value has been read from the Yoga Slim 7. The PnP revision, subsystem ID and Windows firmware string do not supply that value. JF/HR remains unknown until an approved, read-only, independently reviewed acquisition path exists; no register access is authorized or required for this documentation milestone.
+
+### 5. Windows 11 Secure Boot-compatible driver route
+
+The AX211 prototype is not a base to extend by changing its INF. The AX201 needs a separate QuZ-aware driver package and a reviewed device-ownership model. The intended architecture is:
+
+- **Kernel driver:** a hardware-specific PCIe/KMDF driver boundary for PnP resource ownership, interrupt registration, DMA enabler/common buffers, power management, firmware command transport, RX/TX queues, watchdogs and a fail-closed teardown path. It must not expose arbitrary register or DMA operations to user mode.
+- **User-mode radio/AWDL service:** consumes bounded, versioned IOCTL messages and owns AWDL scheduling, peer/discovery state and packet policy. It cannot provide DMA addresses or program hardware.
+- **DropWin application:** reuses the existing consent, sender metadata, file validation and receive UI.
+- **Virtual network interface:** only if required by the final AWDL/IP architecture; it is a separate component and must not be mistaken for the physical-radio driver.
+
+This is an architecture proposal, not a driver skeleton. A custom driver must not be installed alongside the Intel function driver in a way that permits two drivers to own the same PCI function.
+
+**Signing gate:** Microsoft's current documentation says attestation signing supports Windows Desktop kernel-mode drivers on Windows 10 and later, requires a Hardware Developer Program account and an EV certificate, and does not require HLK tests. It is not Windows certification and attestation-signed drivers are not published to Windows Update for retail audiences. This is the only plausible near-term Microsoft signing route for a controlled test package while retaining Secure Boot; it still must be validated against the exact Windows 11 Home build, package type, device installation policy and platform security configuration before any laptop test. Production-quality distribution should target WHCP/HLK certification. Test Mode, local test-signing and Secure Boot disablement remain excluded.
+
+References:
+- Microsoft attestation signing requirements and limitations: https://learn.microsoft.com/windows-hardware/drivers/dashboard/code-signing-attestation
+- Microsoft driver-signing options, Windows Desktop support and certification distinction: https://learn.microsoft.com/windows-hardware/drivers/dashboard/driver-signing-offerings
+- Microsoft kernel-mode signing policy: https://learn.microsoft.com/windows-hardware/drivers/install/kernel-mode-code-signing-policy--windows-vista-and-later-
+
+### Gate A/B status after this pass
+
+- **Firmware/NVM:** partial source map recorded; exact API-77 command/version and startup sequence still open.
+- **RX/TX/interrupt/DMA:** RX allocation, free/used/status structures, NAPI ordering and quiescence constraints mapped from source; TX completion and full IRQ/DMA lifecycle still open. No hardware-facing implementation.
+- **JF/HR:** numeric classification confirmed from upstream source; physical Lenovo variant remains unknown.
+- **Secure Boot driver:** architecture and Microsoft attestation-signing candidate documented; exact Windows 11 Home acceptance and a full signed package are not yet demonstrated.
+
+The next safe work item is to turn the source map into a versioned host-only specification and synthetic state tests for queue ownership, RX completion ordering, interrupt/NAPI state transitions, and failure/timeout handling. Do not write a PCI/DMA/firmware driver until that specification has an independent review and the signing gate is resolved.
