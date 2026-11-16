@@ -12,8 +12,8 @@ IWL_TFH_NUM_TBS = 25
 IWL_TFH_TFD_BYTES = 256
 IWL_TFH_MAX_TB_BYTES = 4 * 1024 - 4
 IWL_TFH_MAX_FRAME_BYTES = 8 * 1024
-IWL_GEN2_MAX_TX_QUEUES = 64
-_UINT64_MAX = (1 << 64) - 1
+QUZ_NUM_OF_QUEUES = 512
+QUZ_TX_DMA_ADDRESS_BITS = 36
 
 
 @dataclass(frozen=True)
@@ -51,7 +51,7 @@ def encode_iwl_tfh_tfd(buffers: Iterable[TxBuffer]) -> bytes:
     for index, entry in enumerate(entries):
         if not isinstance(entry, TxBuffer):
             raise TypeError(f"buffer {index} must be a TxBuffer")
-        _require_uint(entry.dma_address, bits=64, field=f"buffer {index} DMA address")
+        _require_uint(entry.dma_address, bits=QUZ_TX_DMA_ADDRESS_BITS, field=f"buffer {index} DMA address")
         if isinstance(entry.length, bool) or not isinstance(entry.length, int):
             raise TypeError(f"buffer {index} length must be an integer")
         if not 1 <= entry.length <= IWL_TFH_MAX_TB_BYTES:
@@ -162,6 +162,11 @@ def encode_quz_tx_byte_count_entry(*, byte_count: int, num_tbs: int) -> bytes:
 
 def encode_gen2_tx_doorbell_value(*, queue_id: int, write_pointer: int) -> int:
     """Build the Gen2 HBUS_TARG_WRPTR value; this does not write the register."""
-    _require_uint(queue_id, bits=6, field="Gen2 TX queue ID")
+    if isinstance(queue_id, bool) or not isinstance(queue_id, int):
+        raise TypeError("Gen2 TX queue ID must be an integer")
+    if not 0 <= queue_id < QUZ_NUM_OF_QUEUES:
+        raise ValueError(
+            f"QuZ TX queue ID must be between 0 and {QUZ_NUM_OF_QUEUES - 1}"
+        )
     _require_uint(write_pointer, bits=8, field="Gen2 TX write pointer")
     return (queue_id << 16) | write_pointer
