@@ -1,0 +1,115 @@
+from __future__ import annotations
+
+import struct
+from dataclasses import dataclass
+from typing import Iterable
+
+# Intel iwlwifi QuZ / device family 22000 constants, cross-checked against
+# drivers/net/wireless/intel/iwlwifi/iwl-fh.h and cfg/22000.c.
+QUZ_TFD_QUEUE_SIZE = 256
+QUZ_MAX_PENDING_TFDS = QUZ_TFD_QUEUE_SIZE - 1
+IWL_TFH_NUM_TBS = 25
+IWL_TFH_TFD_BYTES = 256
+IWL_TFH_MAX_TB_BYTES = 4 * 1024 - 4
+IWL_TFH_MAX_FRAME_BYTES = 8 * 1024
+IWL_RX_TRANSFER_DESC_BYTES = 16
+IWL_GEN2_MAX_TX_QUEUES = 64
+_UINT64_MAX = (1 << 64) - 1
+
+
+@dataclass(frozen=True)
+class TxBuffer:
+    """One host-memory segment represented by a Gen2 TX buffer descriptor.
+
+    `dma_address` is only serialized as an unsigned 64-bit field. This class
+    does not allocate, map, validate, or access DMA memory.
+    """
+
+    dma_address: int
+    length: int
+
+
+def _require_uint(value: int, *, bits: int, field: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{field} must be an integer")
+    if not 0 <= value < (1 << bits):
+        raise ValueError(f"{field} must fit in an unsigned {bits}-bit field")
+
+
+def encode_iwl_tfh_tfd(buffers: Iterable[TxBuffer]) -> bytes:
+    """Serialize one Gen2/TFH TX frame descriptor into exactly 256 bytes.
+
+    This is an in-memory format encoder only. It does not allocate DMA memory,
+    create a TX ring, prepare a TX command/byte-count entry, or notify hardware.
+    """
+    entries = tuple(buffers)
+    if not entries:
+        raise ValueError("a TX frame descriptor must contain at least one buffer")
+    if len(entries) > IWL_TFH_NUM_TBS:
+        raise ValueError(f"a TFH TFD supports at most {IWL_TFH_NUM_TBS} buffers")
+
+    total_bytes = 0
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, TxBuffer):
+            raise TypeError(f"buffer {index} must be a TxBuffer")
+        _require_uint(entry.dma_address, bits=64, field=f"buffer {index} DMA address")
+        if isinstance(entry.length, bool) or not isinstance(entry.length, int):
+            raise TypeError(f"buffer {index} length must be an integer")
+        if not 1 <= entry.length <= IWL_TFH_MAX_TB_BYTES:
+            raise ValueError(
+                f"buffer {index} length must be between 1 and "
+                f"{IWL_TFH_MAX_TB_BYTES} bytes"
+            )
+        total_bytes += entry.length
+
+    if total_bytes > IWL_TFH_MAX_FRAME_BYTES:
+        raise ValueError(
+            f"combined TX frame exceeds {IWL_TFH_MAX_FRAME_BYTES} bytes"
+        )
+
+    # struct iwl_tfh_tfd: le16 num_tbs, 25 packed {le16 len, le64 addr}
+    # entries, then a zeroed le32 pad. All unused entries remain zero.
+    encoded = bytearray(struct.pack("<H", len(entries)))
+    for entry in entries:
+        encoded.extend(struct.pack("<HQ", entry.length, entry.dma_address))
+    encoded.extend(b"\0" * ((IWL_TFH_NUM_TBS - len(entries)) * 10))
+    encoded.extend(struct.pack("<I", 0))
+
+    if len(encoded) != IWL_TFH_TFD_BYTES:
+        raise AssertionError("internal TFH TFD size calculation is inconsistent")
+    return bytes(encoded)
+
+
+def encode_iwl_rx_transfer_desc(*, rbid: int, dma_address: int) -> bytes:
+    """Serialize the 16-byte Gen2 RX transfer descriptor.
+
+    The three reserved 16-bit words are emitted as zero. No RX buffer is
+    allocated or mapped, and this function does not post a descriptor.
+    """
+    _require_uint(rbid, bits=16, field="RX buffer ID")
+    _require_uint(dma_address, bits=64, field="RX DMA address")
+    return struct.pack("<HHHHQ", rbid, 0, 0, 0, dma_address)
+
+
+def quz_tx_queue_advance(write_pointer: int) -> int:
+    """Advance the QuZ TX write counter using max_tfd_queue_size=256."""
+    _require_uint(write_pointer, bits=8, field="QuZ TX write pointer")
+    return (write_pointer + 1) & (QUZ_TFD_QUEUE_SIZE - 1)
+
+
+def quz_tx_pending_count(read_pointer: int, write_pointer: int) -> int:
+    """Return the modular distance between QuZ TX read and write counters.
+
+    The value is unambiguous for the supported queue discipline, which keeps
+    one slot empty; a full 256-entry queue is not a valid pending state.
+    """
+    _require_uint(read_pointer, bits=8, field="QuZ TX read pointer")
+    _require_uint(write_pointer, bits=8, field="QuZ TX write pointer")
+    return (write_pointer - read_pointer) & (QUZ_TFD_QUEUE_SIZE - 1)
+
+
+def encode_gen2_tx_doorbell_value(*, queue_id: int, write_pointer: int) -> int:
+    """Build the Gen2 HBUS_TARG_WRPTR value; this does not write the register."""
+    _require_uint(queue_id, bits=6, field="Gen2 TX queue ID")
+    _require_uint(write_pointer, bits=8, field="Gen2 TX write pointer")
+    return (queue_id << 16) | write_pointer
