@@ -57,16 +57,20 @@ This is a test target only. It is not yet validated for AWDL. Secure Boot and th
 
 ## AX201 assessment — 2026-11-16
 
-The test machine's Intel Wi-Fi 6 AX201 is supported by Intel on Windows 11. Intel's current public package at the time of this update is 24.80.0 and lists AX201 among supported adapters. This is ordinary adapter/OS support, **not** evidence of AWDL, monitor-mode, raw 802.11 frame injection, or AWDL channel scheduling support. Intel's public compatibility material does not claim AirDrop/AWDL support for this adapter.
+The test machine is a Lenovo Yoga Slim 7 14ITL05 (machine type 82A3), with an Intel Core i7-1165G7 and Intel Wi-Fi 6 AX201 160MHz. The user updated the adapter from Intel driver 22.80.0.9 to Intel driver **24.80.0.2** (date reported by Windows: 2026-09-16; INF: `oem227.inf`). The new report identifies firmware **D4.79**.
 
-The user's actual read-only report from the installed 22.80.0.9 driver confirms: 802.11b/g/n/a/ac/ax PHY modes; management frames and Action frames supported; Network Monitor mode **not supported**; promiscuous mode **not supported**; simultaneous channel count reported as 0/unavailable. Action-frame support alone is not enough to implement AWDL. The garbled accented characters in the copied report are a console text-encoding issue, not a Wi-Fi capability result.
+The post-update, read-only `netsh wlan show drivers` and `netsh wlan show wirelesscapabilities` report still advertises:
+- 802.11b/g/n/a/ac/ax PHY modes, protected management frames, and Action frames.
+- Network Monitor mode: **not supported**.
+- Promiscuous mode: **not supported**.
+- Simultaneous channel count: **0**; radio count: **0**.
+- Wi-Fi Direct and its P2P discovery features: supported.
 
-The reported machine driver is 22.80.0.9. DropWin now includes a read-only diagnostic view based on `netsh wlan show drivers` and `netsh wlan show wirelesscapabilities`. These Windows reports can establish the driver and advertised WLAN capabilities, but cannot certify AWDL compatibility. No driver update, adapter reset, test-signing change, Secure Boot change, or packet injection is performed.
+This is useful evidence that the newer Intel package installed correctly, but it does **not** expose the raw-frame/monitor capabilities currently needed for the proposed AWDL research path. Action-frame support is not equivalent to arbitrary raw 802.11 frame reception/transmission, and Wi-Fi Direct is not AWDL. The Windows capability report does not certify AWDL compatibility. The garbled accented characters in the copied report are a console text-encoding issue, not a radio capability result.
 
-The current `winawdl` research project reports end-to-end AirDrop tests on one Realtek RTL8852CE machine only. Its design notes explain that the stock Realtek driver also lacked monitor/promiscuous mode, so the project bypasses it with a custom UMDF radio driver and user-mode DMA. This is highly hardware-specific and carries significant risk (including direct bus-master DMA and temporarily taking Wi-Fi away from Windows). It is an architectural reference, not a drop-in backend for Intel AX201. Do not install its driver on this PC.
+The Intel 24.80.0.2 update therefore did not change the key reported limitation. Do not install the `winawdl` custom radio driver on this AX201: that project is documented for a single Realtek RTL8852CE test machine and uses a hardware-specific UMDF/user-mode DMA design with significant security and reliability implications. Do not disable Secure Boot or Kernel DMA Protection as an experiment. No driver modification, adapter reset, test-signing change, or packet injection has been performed by DropWin.
 
-Next decision gate: identify the PC manufacturer/model and check its approved driver package before considering an update from Intel 22.80.0.9 to Intel's newer AX201-compatible package. A driver update may improve reliability or expose different documented capabilities, but there is no evidence it will add monitor mode or AWDL. Re-run the same read-only reports after any approved update. If monitor/raw-frame access remains unavailable, investigate whether a safe, documented AX201 radio path exists before considering a custom driver; otherwise evaluate a different internal Wi-Fi chipset. Do not imply that an app-only wrapper can bypass missing driver/radio capabilities.
-
+Next decision gate: investigate whether a documented, safe AX201 interface exists for the raw radio operations AWDL requires. If no such path can be established, the built-in AX201 may not be a viable radio for native AirDrop on this machine. DropWin must not present this adapter as AWDL-compatible or imply that an application-only change can bypass missing driver/radio capabilities.
 
 - [OpenDrop](https://github.com/seemoo-lab/opendrop) — Python AirDrop protocol implementation; upstream documents macOS and Linux/AWDL requirements, not native Windows support.
 - [Open Wireless Link (OWL)](https://github.com/seemoo-lab/owl) — open AWDL implementation primarily for Linux.
