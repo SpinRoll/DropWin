@@ -339,3 +339,44 @@ def test_quz_rx_ledger_rejects_invalid_pool_size(pool_size) -> None:
 
     with pytest.raises((TypeError, ValueError)):
         QuzRxBufferLedger(pool_size=pool_size)
+
+
+@pytest.mark.parametrize(
+    ("host", "firmware", "size", "expected"),
+    [(0, 0, 512, 0), (0, 7, 512, 7), (510, 2, 512, 4),
+     (2046, 2, 2048, 4), (12, 12, 2048, 0)],
+)
+def test_quz_rx_completed_count_wraps(
+    host, firmware, size, expected
+) -> None:
+    from dropwin.platform.intel_ax201_transport import quz_rx_completed_count
+
+    assert quz_rx_completed_count(host, firmware, queue_size=size) == expected
+
+
+@pytest.mark.parametrize(
+    ("write_pointer", "size", "expected"),
+    [(0, 512, 0), (7, 512, 0), (8, 512, 8), (15, 512, 8),
+     (2047, 2048, 2040)],
+)
+def test_quz_rx_restock_pointer_rounds_down_to_eight(
+    write_pointer, size, expected
+) -> None:
+    from dropwin.platform.intel_ax201_transport import (
+        quz_rx_restock_doorbell_pointer,
+    )
+
+    assert quz_rx_restock_doorbell_pointer(
+        write_pointer, queue_size=size
+    ) == expected
+
+
+@pytest.mark.parametrize(
+    ("host", "firmware", "size"),
+    [(-1, 0, 512), (0, 512, 512), (0, 0, 256), (0, 0, 4096)],
+)
+def test_quz_rx_completed_count_rejects_invalid_indices(host, firmware, size):
+    from dropwin.platform.intel_ax201_transport import quz_rx_completed_count
+
+    with pytest.raises(ValueError):
+        quz_rx_completed_count(host, firmware, queue_size=size)
