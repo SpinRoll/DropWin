@@ -204,7 +204,7 @@ The physical TX TFD circular buffer is documented separately in `iwl-fh.h` as 25
 
 This corrects a possible ambiguity in the earlier shorthand “maximum TFD queue size”: do not describe 65,536 as the AX211 physical descriptor-ring allocation size.
 
-The AX211 Windows reference maintains a 16-bit logical TX index, maps the TFD slot with `index & 255`, and writes its queue doorbell with a 16-bit `(index + 1) & 65535` value. Linux QuZ's `max_tfd_queue_size=256` instead makes its generic outstanding-distance calculation wrap at 256. These are materially different logical-counter assumptions. The AX211 doorbell/index sequence must **not** be copied to QuZ by changing only the PCI ID or TFD ring constant. A QuZ port must establish the actual hardware pointer and doorbell semantics from the QuZ-specific Linux transport path and validate all wrap cases in host-only tests first.
+The wrap behavior is explicit in the Linux source: `iwl_txq_inc_wrap()` returns `(++index) & (max_tfd_queue_size - 1)`. For QuZ this constrains the logical `write_ptr`/read-pointer sequence to a 256-value cycle. The Gen2 doorbell helper writes `write_ptr | (txq_id << 16)` to `HBUS_TARG_WRPTR`; queue selection is encoded separately from the low write index. The AX211 Windows reference instead keeps a 16-bit logical TX index, maps the physical TFD slot with `index & 255`, and writes `(index + 1) & 65535` in the low doorbell field. These are materially different logical-counter assumptions. The AX211 doorbell/index sequence must **not** be copied to QuZ by changing only the PCI ID or TFD ring constant. A QuZ port must follow the QuZ wrap rule and separately verify pointer initialization, completion/read-pointer updates and queue selection in source before any implementation.
 
 ### RX transfer descriptor: layout matches, queue policy still needs proof
 
@@ -234,7 +234,8 @@ Linux's RX comments describe a shared host/firmware buffer lifecycle with read/w
 - Linux QuZ MAC configuration and queue parameters: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/cfg/22000.c
 - Linux AX210/SO queue parameters: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/cfg/ax210.c
 - Linux Gen2 TFD definition and physical-ring description: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/iwl-fh.h
-- Linux Gen2 TX queue-space arithmetic: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/pcie/tx-gen2.c
+- Linux Gen2 TX queue-space arithmetic and doorbell write: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/pcie/tx-gen2.c
+- Linux TX pointer wrap and physical-slot mapping: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/pcie/internal.h
 - Linux logical-to-physical TX slot mapping: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/pcie/internal.h
 - Linux AX210+ RX transfer descriptor: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/pcie/internal.h
 - AX211 reference descriptor/context layout: https://github.com/21Suspect/AirDrop-for-Windows/blob/main/native/intel/iwl_gen3.h and https://github.com/21Suspect/AirDrop-for-Windows/blob/main/native/intel/iwl_gen3.c
