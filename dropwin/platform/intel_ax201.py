@@ -33,6 +33,14 @@ class IntelRfVariant(str, Enum):
 
 
 @dataclass(frozen=True)
+class IntelRfIdentity:
+    raw_value: int
+    type_code: int
+    step: int
+    variant: IntelRfVariant
+
+
+@dataclass(frozen=True)
 class PciIdentity:
     vendor_id: int
     device_id: int
@@ -107,6 +115,47 @@ def identify_intel_radio(pnp_id: str) -> IntelRadioProfile | None:
         firmware_api_max=AX201_FIRMWARE_API,
         exact_dropwin_test_target=exact_target,
     )
+
+
+def identify_intel_rf(raw_rf_id: int) -> IntelRfIdentity | None:
+    """Decode a supplied Intel CSR_HW_RFID value; does not read hardware.
+
+    Bit fields follow Linux iwlwifi's CSR_HW_RFID_TYPE and
+    CSR_HW_RFID_STEP macros. Unknown RF types remain unresolved.
+    """
+    if isinstance(raw_rf_id, bool) or not isinstance(raw_rf_id, int):
+        raise TypeError("RF-ID must be an integer")
+    if not 0 <= raw_rf_id <= 0xFFFFFFFF:
+        raise ValueError("RF-ID must be an unsigned 32-bit value")
+
+    type_code = (raw_rf_id & 0x0FFF000) >> 12
+    step = (raw_rf_id & 0x0000F00) >> 8
+    variant_by_code = {
+        0x105: IntelRfVariant.JF2,
+        0x108: IntelRfVariant.JF1,
+        0x10A: IntelRfVariant.HR2,
+        0x10C: IntelRfVariant.HR1,
+    }
+    variant = variant_by_code.get(type_code)
+    if variant is None:
+        return None
+    return IntelRfIdentity(
+        raw_value=raw_rf_id,
+        type_code=type_code,
+        step=step,
+        variant=variant,
+    )
+
+
+def firmware_filename_for_rf_id(
+    raw_rf_id: int,
+    api: int = AX201_FIRMWARE_API,
+) -> str | None:
+    """Resolve a QuZ filename from an independently obtained controller RF-ID."""
+    identity = identify_intel_rf(raw_rf_id)
+    if identity is None:
+        return None
+    return firmware_filename_for_rf_variant(identity.variant, api=api)
 
 
 def firmware_filename_for_rf_variant(
