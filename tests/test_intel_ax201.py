@@ -137,9 +137,14 @@ def test_inspects_header_only_image() -> None:
             "alignment padding",
         ),
         (
-            bytes(88)
-            + struct.pack("<II", 19, 100)
-            + b"short",
+            (
+                bytearray(
+                    struct.pack("<II", 0, 0x0A4C5749)
+                    + bytes(80)
+                )
+                + struct.pack("<II", 19, 100)
+                + b"short"
+            ),
             "extends beyond",
         ),
         (b"x" * (8 * 1024 * 1024 + 1), "8 MiB"),
