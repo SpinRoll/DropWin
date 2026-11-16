@@ -6,7 +6,7 @@ import subprocess
 from dropwin.platform import windows
 
 
-AX201_PNP_ID = r"PCI\\VEN_8086&DEV_A0F0&SUBSYS_00748086&REV_20"
+AX201_PNP_ID = r"PCI\VEN_8086&DEV_A0F0&SUBSYS_00748086&REV_20"
 
 
 def test_wifi_diagnostics_are_not_available_off_windows(monkeypatch) -> None:
