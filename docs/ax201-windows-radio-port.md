@@ -283,3 +283,15 @@ The ledger rejects out-of-pool VIDs, completion of a VID that is not currently p
 **Scope limitation:** this is an ownership *model*, not a Linux RX implementation. It intentionally does not model the per-queue RX completion/status rings, multi-queue batching thresholds, allocator request accounting, emergency path, memory/page allocation, DMA mapping, queue restock, interrupts, or stop/teardown synchronization. In particular, returning a replacement to `FREE` is a logical state transition only; it does not imply that a page exists or that any DMA mapping is valid. The Linux reference describes these additional mechanisms and the need to stop/synchronize RX before freeing resources. No hardware access or laptop changes were made.
 
 Source basis: Linux `pcie/rx.c` documents the VID lookup/invalid flag, completion handling, reused-page versus stolen-page paths, allocator movement, and RX DMA stop path: https://linux.googlesource.com/linux/kernel/git/torvalds/linux/+/cdb3033e191fd03da2d7da23b9cd448dfa180a8e/drivers/net/wireless/intel/iwlwifi/pcie/rx.c (notably the RBD lifecycle comments, `iwl_pcie_get_rxb`, `iwl_pcie_rx_handle_rb`, and `iwl_pcie_rx_stop`).
+
+
+## QuZ MQ RX completion and restock pointer arithmetic — 2026-11-16
+
+Two additional host-only helpers capture details specific to the QuZ multi-queue RX path:
+
+- `quz_rx_completed_count(host_read, firmware_read, queue_size)` computes the number of completion entries between the host cursor and the firmware's exclusive status cursor, including wrap-around. The Linux handler processes entries until its cursor equals the firmware status index.
+- `quz_rx_restock_doorbell_pointer(write_pointer, queue_size)` rounds the host write index down to an eight-entry boundary. Linux records `write_actual = round_down(write, 8)` and, for this pre-BZ multi-queue family, updates the RFH per-queue free-buffer write-index register. The helper returns only the aligned integer; it does not select a register, write it, or access hardware.
+
+These arithmetic helpers do not establish the active Lenovo queue count, RF configuration, completion interrupt mapping, or firmware initialization sequence. The completion cursor is not a free-running hardware counter model; it is a bounded ring index as used by the cited RX handler.
+
+Source: Linux `pcie/rx.c` describes the QuZ 32-bit used-buffer completion entry (low 12-bit VID), completion processing, queue-index wrap, 8-entry restock alignment, and pre-BZ RFH queue write-index update: https://linux.googlesource.com/linux/kernel/git/torvalds/linux/+/cdb3033e191fd03da2d7da23b9cd448dfa180a8e/drivers/net/wireless/intel/iwlwifi/pcie/rx.c (see `iwl_pcie_rxq_inc_wr_ptr`, `iwl_pcie_rxmq_restock`, `iwl_pcie_get_rxb`, and `iwl_pcie_rx_handle`).
