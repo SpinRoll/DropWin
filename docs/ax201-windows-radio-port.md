@@ -173,3 +173,73 @@ This real-device report strengthens the existing conclusion about the stock Wind
 The output is consistent with the documented Linux AX201 QuZ mapping and the host-only parser. It does not identify the controller RF-ID, so JF versus HR remains unresolved. The Windows firmware label `D4.79` is recorded as an observation only; it must not be translated into an Intel Linux uCode filename or used to infer the RF family.
 
 **Engineering consequence:** do not spend effort trying to enable AWDL through a Windows WLAN setting or by toggling an NDIS filter over this stock miniport. Continue the offline, source-based QuZ hardware/firmware/descriptor map. Any future custom radio path is a separate driver-development effort and remains gated on an independently reviewed design and a viable signed deployment route. The user's stock Intel driver, Secure Boot, and Kernel DMA Protection remain unchanged.
+
+
+## Static TX/RX descriptor comparison — 2026-11-16
+
+A source-level comparison of Linux iwlwifi's QuZ path with the public AX211 Windows prototype identifies some reusable *wire layouts*, but also a queue-counter difference that makes copying the AX211 session logic unsafe.
+
+### TX descriptor: common Gen2 TFD layout is a reuse candidate
+
+Linux maps the A0F0 QuZ device to `iwl_qu_long_latency_mac_cfg`; the QuZ MAC configuration sets `.gen2 = true`. Linux's Gen2 path therefore selects `struct iwl_tfh_tfd`, not the legacy `struct iwl_tfd`.
+
+The Gen2 TFD layout in `iwl-fh.h` is:
+- 16-bit little-endian number of active transfer buffers;
+- 25 packed `iwl_tfh_tb` entries;
+- each TB has a 16-bit little-endian byte length and a 64-bit little-endian DMA address (10 bytes);
+- 32-bit padding.
+
+Its size is 2 + (25 × 10) + 4 = **256 bytes**. Linux's source comments also describe a physical circular TFD ring of **256 descriptors** per TX queue for 22000-and-later hardware, with 256 bytes per descriptor for the 22000 layout.
+
+The AX211 Windows reference's packet builder also reserves a 256-byte TFD buffer and writes the same broad Gen2-style fields (active TB count, 16-bit lengths, 64-bit DMA addresses). This makes the descriptor's basic serialization a plausible reuse candidate. It does **not** establish that the AX211 command payload, queue configuration, doorbell, status/completion, firmware API sub-versions or TX policy can be reused for QuZ. The AX211 builder is pinned to its own TX command version 10 and TX notification version 7; those versions need an independent QuZ/API-77 source check.
+
+### Queue-size terminology: physical ring slots are not the logical counter modulus
+
+Two Linux values must not be conflated:
+
+- QuZ `iwl_22000_base.max_tfd_queue_size = 256`.
+- AX210/SO `iwl_ax210_base.max_tfd_queue_size = 65536`.
+
+The physical TX TFD circular buffer is documented separately in `iwl-fh.h` as 256 descriptor entries. In `pcie/tx-gen2.c`, `max_tfd_queue_size` is used by `iwl_txq_space()` to calculate the modular outstanding distance from `write_ptr - read_ptr`, and to prevent the full/empty ambiguity. Separately, `pcie/internal.h` maps a logical index to a physical descriptor slot using `index & (q->n_window - 1)`. Therefore the 256-versus-65536 configuration difference is **not** a statement that the physical ring contains 256 versus 65,536 TFD allocations. It changes the queue-accounting/counter-wrap model; the actual slot count is represented by `q->n_window`.
+
+This corrects a possible ambiguity in the earlier shorthand “maximum TFD queue size”: do not describe 65,536 as the AX211 physical descriptor-ring allocation size.
+
+The AX211 Windows reference maintains a 16-bit logical TX index, maps the TFD slot with `index & 255`, and writes its queue doorbell with a 16-bit `(index + 1) & 65535` value. Linux QuZ's `max_tfd_queue_size=256` instead makes its generic outstanding-distance calculation wrap at 256. These are materially different logical-counter assumptions. The AX211 doorbell/index sequence must **not** be copied to QuZ by changing only the PCI ID or TFD ring constant. A QuZ port must establish the actual hardware pointer and doorbell semantics from the QuZ-specific Linux transport path and validate all wrap cases in host-only tests first.
+
+### RX transfer descriptor: layout matches, queue policy still needs proof
+
+Linux's `pcie/internal.h` defines the AX210-and-later RX transfer descriptor as a packed 16-byte structure:
+- 16-bit little-endian RB ID;
+- three reserved 16-bit words;
+- 64-bit little-endian DMA address.
+
+The AX211 Windows reference's `IWL_RX_TRANSFER` has the same field order and total size (16 bytes). This supports reuse of a small, explicitly little-endian descriptor serializer/parser. It does **not** prove that QuZ uses the AX211 ring depth, buffer size, status ring layout, completion processing or buffer-ownership lifecycle. The AX211 prototype currently chooses 512 RX descriptors and 4 KiB buffers; those are reference implementation parameters, not yet a QuZ port specification.
+
+Linux's RX comments describe a shared host/firmware buffer lifecycle with read/write indexes, replenishment and ownership transitions. The Windows implementation must account for this lifecycle and device-quiescence rules rather than merely matching the descriptor's C structure.
+
+### Current reuse matrix
+
+| Area | Finding | Decision |
+|---|---|---|
+| Gen2 TX TFD field layout | 256-byte packed TFD, 25 possible TB entries; common layout is plausible | Reuse only a tested serializer/layout definition |
+| Physical TX TFD ring | 256 slots documented for 22000+ hardware | Candidate baseline; verify QuZ queue configuration |
+| Logical TX counter | QuZ modulus 256; AX211 reference uses a 16-bit sequence/doorbell | **Do not reuse AX211 counter/doorbell logic** |
+| RX transfer descriptor | Same 16-byte field layout | Reuse candidate with explicit little-endian encoding |
+| RX ring depth/buffer ownership | AX211 uses 512 × 4 KiB; QuZ policy not yet established | Keep unresolved |
+| TX command/notification API | AX211 reference pins command v10 / notification v7 | Verify against QuZ firmware/API before reuse |
+| Firmware boot, NVM, DMA and IRQ sequence | Hardware-family-specific | No reuse without QuZ-specific source map and review |
+
+### Primary source references
+
+- Linux QuZ MAC configuration and queue parameters: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/cfg/22000.c
+- Linux AX210/SO queue parameters: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/cfg/ax210.c
+- Linux Gen2 TFD definition and physical-ring description: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/iwl-fh.h
+- Linux Gen2 TX queue-space arithmetic: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/pcie/tx-gen2.c
+- Linux logical-to-physical TX slot mapping: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/pcie/internal.h
+- Linux AX210+ RX transfer descriptor: https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/pcie/internal.h
+- AX211 reference descriptor/context layout: https://github.com/21Suspect/AirDrop-for-Windows/blob/main/native/intel/iwl_gen3.h and https://github.com/21Suspect/AirDrop-for-Windows/blob/main/native/intel/iwl_gen3.c
+- AX211 reference TX packet builder: https://github.com/21Suspect/AirDrop-for-Windows/blob/main/native/intel/iwl_packet.c
+- AX211 reference TX index/doorbell path: https://github.com/21Suspect/AirDrop-for-Windows/blob/main/native/intel/ax211_session.inc
+- AX211 reference RX ring and ownership path: https://github.com/21Suspect/AirDrop-for-Windows/blob/main/native/intel/ax211_boot.inc
+
+**Next static Gate A task:** trace the QuZ-specific command queue initialization, read/write pointer and doorbell updates, RX default queue setup, and completion/interrupt path. Build table-driven unit tests for descriptor sizes, endianness, index wrap and invalid lengths. These tests must operate on synthetic memory only. Do not add PCI register writes, DMA allocations, firmware start, RF operations or a laptop driver in this phase.
