@@ -132,8 +132,16 @@ def test_inspects_header_only_image() -> None:
         (b"", "truncated"),
         (bytes(88), "magic"),
         (bytes(87), "truncated"),
-        (make_tlv_firmware()[:-1], "alignment padding"),
-        (make_tlv_firmware()[:91], "extends beyond"),
+        (
+            make_tlv_firmware(records=((19, b"abc"),))[:-1],
+            "alignment padding",
+        ),
+        (
+            bytes(88)
+            + struct.pack("<II", 19, 100)
+            + b"short",
+            "extends beyond",
+        ),
         (b"x" * (8 * 1024 * 1024 + 1), "8 MiB"),
     ],
 )
@@ -150,9 +158,9 @@ def test_rejects_trailing_partial_tlv_header() -> None:
 
 def test_firmware_api_is_extracted_from_packed_version_byte() -> None:
     image = inspect_iwl_tlv_firmware(
-        make_tlv_firmware(packed_version=0x0A03004D, records=())
+        make_tlv_firmware(packed_version=0x0A034D01, records=())
     )
     assert image.major == 10
     assert image.minor == 3
-    assert image.api == 0
-    assert image.serial == 0x4D
+    assert image.api == 77
+    assert image.serial == 1
