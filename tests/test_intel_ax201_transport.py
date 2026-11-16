@@ -159,9 +159,9 @@ def test_quz_rx_queue_space_keeps_one_slot_empty(
     assert quz_rx_queue_space(read_pointer, write_pointer, queue_size=size) == expected
 
 
-@pytest.mark.parametrize("vid", [0, 1, 511, 2047])
+@pytest.mark.parametrize("vid", [0, 1, 511, 512, 2047])
 def test_quz_rx_vid_is_checked_against_selected_pool(vid) -> None:
-    if vid == 0 or vid >= 512:
+    if vid == 0 or vid > 512:
         with pytest.raises(ValueError):
             validate_quz_rx_vid(vid=vid, pool_size=512)
     else:
@@ -170,6 +170,7 @@ def test_quz_rx_vid_is_checked_against_selected_pool(vid) -> None:
 
 def test_quz_rx_vid_accepts_high_ids_only_in_larger_pool() -> None:
     assert validate_quz_rx_vid(vid=2047, pool_size=2048) == 2047
+    assert validate_quz_rx_vid(vid=2048, pool_size=2048) == 2048
     with pytest.raises(ValueError):
         validate_quz_rx_vid(vid=2047, pool_size=512)
 
