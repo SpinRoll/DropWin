@@ -23,6 +23,6 @@ def test_wifi_diagnostics_collects_read_only_netsh_reports(monkeypatch) -> None:
 
     assert len(calls) == 2
     assert calls[0][-2:] == ["show", "drivers"]
-    assert calls[1][-2:] == ["wirelesscapabilities"]
+    assert calls[1][-1:] == ["wirelesscapabilities"]
     assert "non dimostrano il supporto AWDL" in report
     assert report.count("Report di prova") == 2
