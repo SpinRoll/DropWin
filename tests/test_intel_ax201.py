@@ -135,14 +135,17 @@ def test_rf_id_parser_rejects_invalid_numeric_values() -> None:
 
 def make_tlv_firmware(
     *,
-    packed_version: int = 0x01024D03,
+    header_version: int = 77,
     build: int = 12345,
-    records: tuple[tuple[int, bytes], ...] = ((19, b"abc"), (36, b"123456789012")),
+    records: tuple[tuple[int, bytes], ...] = (
+        (19, b"abc"),
+        (36, struct.pack("<III", 77, 4, 2)),
+    ),
 ) -> bytes:
     header = bytearray(88)
     struct.pack_into("<II", header, 0, 0, 0x0A4C5749)
     header[8:8 + len(b"synthetic test firmware")] = b"synthetic test firmware"
-    struct.pack_into("<II", header, 72, packed_version, build)
+    struct.pack_into("<II", header, 72, header_version, build)
 
     body = bytearray()
     for type_id, payload in records:
@@ -156,7 +159,9 @@ def test_inspects_tlv_header_and_record_inventory() -> None:
     image = inspect_iwl_tlv_firmware(make_tlv_firmware())
 
     assert image.human_readable == "synthetic test firmware"
-    assert image.version == "1.2.77.3"
+    assert image.header_version == 77
+    assert image.version == "77.4.2"
+    assert image.firmware_version_tlv == (77, 4, 2)
     assert image.build == 12345
     assert image.file_bytes == 88 + 12 + 20
     assert [(item.type_id, item.length) for item in image.tlvs] == [(19, 3), (36, 12)]
@@ -166,6 +171,8 @@ def test_inspects_tlv_header_and_record_inventory() -> None:
 
 def test_inspects_header_only_image() -> None:
     image = inspect_iwl_tlv_firmware(make_tlv_firmware(records=()))
+    assert image.header_version == 77
+    assert image.version is None
     assert image.tlvs == ()
 
 
@@ -204,11 +211,27 @@ def test_rejects_trailing_partial_tlv_header() -> None:
         inspect_iwl_tlv_firmware(image)
 
 
-def test_firmware_api_is_extracted_from_packed_version_byte() -> None:
+def test_header_version_is_kept_separate_from_fw_version_tlv() -> None:
     image = inspect_iwl_tlv_firmware(
-        make_tlv_firmware(packed_version=0x0A034D01, records=())
+        make_tlv_firmware(
+            header_version=99,
+            records=((36, struct.pack("<III", 77, 2, 1)),),
+        )
     )
-    assert image.major == 10
-    assert image.minor == 3
-    assert image.api == 77
-    assert image.serial == 1
+    assert image.header_version == 99
+    assert image.firmware_version_tlv == (77, 2, 1)
+    assert image.version == "77.2.1"
+
+
+def test_rejects_malformed_or_duplicate_fw_version_tlv() -> None:
+    with pytest.raises(FirmwareFormatError, match="exactly 12 bytes"):
+        inspect_iwl_tlv_firmware(make_tlv_firmware(records=((36, b"short"),)))
+    with pytest.raises(FirmwareFormatError, match="duplicate FW_VERSION"):
+        inspect_iwl_tlv_firmware(
+            make_tlv_firmware(
+                records=(
+                    (36, struct.pack("<III", 77, 1, 0)),
+                    (36, struct.pack("<III", 77, 2, 0)),
+                )
+            )
+        )
