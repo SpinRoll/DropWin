@@ -96,6 +96,21 @@ def encode_quz_rx_buffer_descriptor(*, rbid: int, dma_address: int) -> bytes:
     return struct.pack("<Q", dma_address | rbid)
 
 
+
+def extract_quz_rx_completion_vid(completion_word: int) -> int:
+    """Extract the pre-AX210 QuZ RX completion's 12-bit virtual buffer ID.
+
+    Linux reads the older-family completion ring as little-endian u32 entries
+    and masks the low 12 bits. VID zero is invalid. The caller must additionally
+    check the returned ID against its own RX pool size and ownership state.
+    """
+    _require_uint(completion_word, bits=32, field="QuZ RX completion word")
+    vid = completion_word & 0x0FFF
+    if vid == 0:
+        raise ValueError("QuZ RX completion contains the invalid zero VID")
+    return vid
+
+
 def quz_tx_queue_advance(write_pointer: int) -> int:
     """Advance the QuZ TX write counter using max_tfd_queue_size=256."""
     _require_uint(write_pointer, bits=8, field="QuZ TX write pointer")
