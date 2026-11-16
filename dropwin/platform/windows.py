@@ -58,3 +58,37 @@ def get_wireless_adapters() -> list[WirelessAdapter]:
         if name or description:
             adapters.append(WirelessAdapter(name=name, description=description))
     return adapters
+
+
+def collect_wifi_diagnostics() -> str:
+    """Collect read-only Windows WLAN reports; this does not test or enable AWDL."""
+    if platform.system() != "Windows":
+        return "La diagnostica è disponibile solo su Windows."
+
+    reports: list[str] = [
+        "DIAGNOSTICA WI-FI DROPWIN",
+        "Raccolta in sola lettura: nessuna impostazione o driver viene modificato.",
+        "Questi report NON dimostrano il supporto AWDL.",
+    ]
+    for title, arguments in (
+        ("Driver Wi-Fi", ["netsh.exe", "wlan", "show", "drivers"]),
+        ("Funzionalità Wi-Fi", ["netsh.exe", "wlan", "show", "wirelesscapabilities"]),
+    ):
+        reports.extend(["", f"=== {title} ==="])
+        try:
+            result = subprocess.run(
+                arguments,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=12,
+                errors="replace",
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            reports.append(f"Comando non disponibile: {error}")
+            continue
+
+        output = result.stdout.strip() or result.stderr.strip()
+        reports.append(output if output else f"Nessun output (codice {result.returncode}).")
+
+    return "\n".join(reports)
