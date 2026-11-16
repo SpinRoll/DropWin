@@ -12,7 +12,6 @@ IWL_TFH_NUM_TBS = 25
 IWL_TFH_TFD_BYTES = 256
 IWL_TFH_MAX_TB_BYTES = 4 * 1024 - 4
 IWL_TFH_MAX_FRAME_BYTES = 8 * 1024
-IWL_RX_TRANSFER_DESC_BYTES = 16
 IWL_GEN2_MAX_TX_QUEUES = 64
 _UINT64_MAX = (1 << 64) - 1
 
@@ -80,15 +79,21 @@ def encode_iwl_tfh_tfd(buffers: Iterable[TxBuffer]) -> bytes:
     return bytes(encoded)
 
 
-def encode_iwl_rx_transfer_desc(*, rbid: int, dma_address: int) -> bytes:
-    """Serialize the 16-byte Gen2 RX transfer descriptor.
+def encode_quz_rx_buffer_descriptor(*, rbid: int, dma_address: int) -> bytes:
+    """Serialize the QuZ multi-queue 8-byte RX buffer descriptor.
 
-    The three reserved 16-bit words are emitted as zero. No RX buffer is
-    allocated or mapped, and this function does not post a descriptor.
+    Linux's pre-AX210 path packs the 12-bit virtual buffer ID into the low
+    12 bits of the 64-bit DMA address. Therefore the address must be
+    4-KiB-aligned and the ID must be in 1..4095. This is an offline encoder:
+    it does not allocate/map DMA, assign a real buffer ID, or post an RBD.
     """
-    _require_uint(rbid, bits=16, field="RX buffer ID")
-    _require_uint(dma_address, bits=64, field="RX DMA address")
-    return struct.pack("<HHHHQ", rbid, 0, 0, 0, dma_address)
+    _require_uint(rbid, bits=12, field="QuZ RX buffer ID")
+    if rbid == 0:
+        raise ValueError("QuZ RX buffer ID must be nonzero")
+    _require_uint(dma_address, bits=64, field="QuZ RX DMA address")
+    if dma_address & 0xFFF:
+        raise ValueError("QuZ RX DMA address must be 4-KiB aligned")
+    return struct.pack("<Q", dma_address | rbid)
 
 
 def quz_tx_queue_advance(write_pointer: int) -> int:
