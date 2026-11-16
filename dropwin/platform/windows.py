@@ -5,11 +5,14 @@ import platform
 import subprocess
 from dataclasses import dataclass
 
+from dropwin.platform.intel_ax201 import identify_intel_radio
+
 
 @dataclass(frozen=True)
 class WirelessAdapter:
     name: str
     description: str
+    pnp_device_id: str = ""
 
 
 def get_wireless_adapters() -> list[WirelessAdapter]:
@@ -23,7 +26,7 @@ def get_wireless_adapters() -> list[WirelessAdapter]:
     script = (
         "Get-NetAdapter -ErrorAction SilentlyContinue | "
         "Where-Object { $_.InterfaceDescription -match 'Wi-Fi|Wireless|802.11' } | "
-        "Select-Object -Property Name, InterfaceDescription | ConvertTo-Json -Compress"
+        "Select-Object -Property Name, InterfaceDescription, PnPDeviceID | ConvertTo-Json -Compress"
     )
     try:
         completed = subprocess.run(
@@ -55,8 +58,15 @@ def get_wireless_adapters() -> list[WirelessAdapter]:
             continue
         name = str(item.get("Name") or "").strip()
         description = str(item.get("InterfaceDescription") or "").strip()
-        if name or description:
-            adapters.append(WirelessAdapter(name=name, description=description))
+        pnp_device_id = str(item.get("PnPDeviceID") or "").strip()
+        if name or description or pnp_device_id:
+            adapters.append(
+                WirelessAdapter(
+                    name=name,
+                    description=description,
+                    pnp_device_id=pnp_device_id,
+                )
+            )
     return adapters
 
 
@@ -69,7 +79,38 @@ def collect_wifi_diagnostics() -> str:
         "DIAGNOSTICA WI-FI DROPWIN",
         "Raccolta in sola lettura: nessuna impostazione o driver viene modificato.",
         "Questi report NON dimostrano il supporto AWDL.",
+        "",
+        "=== Identificazione hardware Wi-Fi ===",
     ]
+
+    adapters = get_wireless_adapters()
+    if not adapters:
+        reports.append("Inventario PnP non disponibile.")
+    for adapter in adapters:
+        reports.append(
+            f"{adapter.name}: {adapter.description or 'descrizione non disponibile'}"
+        )
+        if not adapter.pnp_device_id:
+            reports.append("  PnPDeviceID non disponibile.")
+            continue
+
+        reports.append(f"  PnPDeviceID: {adapter.pnp_device_id}")
+        profile = identify_intel_radio(adapter.pnp_device_id)
+        if profile is None:
+            reports.append("  Profilo Intel AX201 QuZ non riconosciuto da questo ID.")
+            continue
+
+        reports.append(
+            "  Profilo MAC: Intel QuZ / device family 22000 "
+            f"(max TFD queue: {profile.max_tfd_queue_size})."
+        )
+        reports.append(
+            "  RF-ID non esposto dal PnP ID: famiglia JF/HR ancora da confermare."
+        )
+        reports.append(
+            "  Identificazione hardware, non certificazione di compatibilità AWDL."
+        )
+
     for title, arguments in (
         ("Driver Wi-Fi", ["netsh.exe", "wlan", "show", "drivers"]),
         ("Funzionalità Wi-Fi", ["netsh.exe", "wlan", "show", "wirelesscapabilities"]),
