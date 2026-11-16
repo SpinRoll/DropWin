@@ -60,7 +60,8 @@ def test_tfh_tfd_rejects_frames_over_8kib() -> None:
         encode_iwl_tfh_tfd(
             [
                 TxBuffer(0x1000, IWL_TFH_MAX_TB_BYTES),
-                TxBuffer(0x2000, IWL_TFH_MAX_FRAME_BYTES - IWL_TFH_MAX_TB_BYTES + 1),
+                TxBuffer(0x2000, IWL_TFH_MAX_TB_BYTES),
+                TxBuffer(0x3000, 9),
             ]
         )
 
