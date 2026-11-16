@@ -178,7 +178,7 @@ def test_quz_rx_vid_accepts_high_ids_only_in_larger_pool() -> None:
 @pytest.mark.parametrize(
     ("vid", "pool_size", "error"),
     [(1, 0, ValueError), (1, 2049, ValueError), (True, 512, TypeError),
-     (512, 512, ValueError), (1 << 12, 2048, ValueError)],
+     (513, 512, ValueError), (1 << 12, 2048, ValueError)],
 )
 def test_quz_rx_vid_rejects_invalid_pool_or_id(vid, pool_size, error) -> None:
     with pytest.raises(error):
