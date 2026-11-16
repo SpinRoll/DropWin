@@ -1,0 +1,217 @@
+from __future__ import annotations
+
+import re
+import struct
+from dataclasses import dataclass
+from enum import Enum
+
+INTEL_VENDOR_ID = 0x8086
+AX201_DEVICE_ID = 0xA0F0
+IWL_TLV_MAGIC = 0x0A4C5749
+IWL_TLV_HEADER_BYTES = 88
+IWL_MAX_FIRMWARE_BYTES = 8 * 1024 * 1024
+IWL_MAX_TLV_RECORDS = 4096
+AX201_FIRMWARE_API = 77
+
+# Linux iwlwifi maps PCI device 0xA0F0 to iwl_qu_long_latency_mac_cfg.
+# The RF family is selected separately from the hardware RF-ID at runtime.
+_PNP_ID_RE = re.compile(
+    r"^PCI\\VEN_([0-9A-F]{4})&DEV_([0-9A-F]{4})"
+    r"&SUBSYS_([0-9A-F]{8})&REV_([0-9A-F]{2})"
+    r"(?:&[^\\]+)?(?:\\.*)?$",
+    re.IGNORECASE,
+)
+
+
+class IntelRfVariant(str, Enum):
+    """RF-ID family names as classified by Linux iwlwifi (not raw numeric IDs)."""
+
+    JF1 = "JF1"
+    JF2 = "JF2"
+    HR1 = "HR1"
+    HR2 = "HR2"
+
+
+@dataclass(frozen=True)
+class PciIdentity:
+    vendor_id: int
+    device_id: int
+    subsystem_device_id: int
+    subsystem_vendor_id: int
+    revision: int
+
+    @classmethod
+    def from_windows_pnp_id(cls, value: str) -> PciIdentity | None:
+        """Parse a Windows PCI PnP ID without querying or changing the device."""
+        match = _PNP_ID_RE.fullmatch(value.strip())
+        if match is None:
+            return None
+
+        vendor, device, subsystem, revision = (
+            int(part, 16) for part in match.groups()
+        )
+        return cls(
+            vendor_id=vendor,
+            device_id=device,
+            subsystem_device_id=(subsystem >> 16) & 0xFFFF,
+            subsystem_vendor_id=subsystem & 0xFFFF,
+            revision=revision,
+        )
+
+
+@dataclass(frozen=True)
+class IntelRadioProfile:
+    identity: PciIdentity
+    mac_config: str
+    device_family: int
+    gen2_transport: bool
+    integrated_radio: bool
+    xtal_latency_us: int
+    ltr_delay_us: int
+    low_latency_xtal: bool
+    firmware_api_min: int
+    firmware_api_max: int
+    exact_dropwin_test_target: bool
+
+
+def identify_intel_radio(pnp_id: str) -> IntelRadioProfile | None:
+    """Identify the AX201 QuZ MAC profile from a supplied PnP ID.
+
+    This is a pure host-side classifier. It does not read PCI configuration
+    space, query RF registers, load firmware, or access the radio.
+    """
+    identity = PciIdentity.from_windows_pnp_id(pnp_id)
+    if identity is None:
+        return None
+    if identity.vendor_id != INTEL_VENDOR_ID or identity.device_id != AX201_DEVICE_ID:
+        return None
+
+    # Source: Linux iwlwifi pcie/drv.c + cfg/22000.c.
+    # QuZ has the 22000 device family and Gen2 transport. These values describe
+    # the MAC configuration only; they do not identify the RF variant.
+    exact_target = (
+        identity.subsystem_device_id == 0x0074
+        and identity.subsystem_vendor_id == INTEL_VENDOR_ID
+        and identity.revision == 0x20
+    )
+    return IntelRadioProfile(
+        identity=identity,
+        mac_config="iwl_qu_long_latency_mac_cfg",
+        device_family=22000,
+        gen2_transport=True,
+        integrated_radio=True,
+        xtal_latency_us=12000,
+        ltr_delay_us=2500,
+        low_latency_xtal=True,
+        firmware_api_min=AX201_FIRMWARE_API,
+        firmware_api_max=AX201_FIRMWARE_API,
+        exact_dropwin_test_target=exact_target,
+    )
+
+
+def firmware_filename_for_rf_variant(
+    variant: IntelRfVariant | str,
+    api: int = AX201_FIRMWARE_API,
+) -> str:
+    """Resolve a QuZ firmware filename only after RF-ID classification.
+
+    The same PCI device ID can require a filename that depends on the RF
+    family. Callers must supply a family classified from a trusted RF-ID
+    readout; do not infer it from the Windows PnP ID alone.
+    """
+    if api != AX201_FIRMWARE_API:
+        raise ValueError(f"AX201 QuZ firmware API must be {AX201_FIRMWARE_API}")
+
+    try:
+        rf_variant = IntelRfVariant(variant)
+    except ValueError as error:
+        raise ValueError(f"Unsupported or unknown Intel RF variant: {variant!r}") from error
+
+    rf_family = "jf" if rf_variant in {IntelRfVariant.JF1, IntelRfVariant.JF2} else "hr"
+    return f"iwlwifi-QuZ-a0-{rf_family}-b0-{api}.ucode"
+
+
+class FirmwareFormatError(ValueError):
+    """An Intel TLV firmware container is malformed or exceeds parser limits."""
+
+
+@dataclass(frozen=True)
+class FirmwareTlv:
+    type_id: int
+    length: int
+
+
+@dataclass(frozen=True)
+class FirmwareImageSummary:
+    file_bytes: int
+    human_readable: str
+    major: int
+    minor: int
+    api: int
+    serial: int
+    build: int
+    tlvs: tuple[FirmwareTlv, ...]
+
+    @property
+    def version(self) -> str:
+        return f"{self.major}.{self.minor}.{self.api}.{self.serial}"
+
+    def count_tlv_type(self, type_id: int) -> int:
+        return sum(record.type_id == type_id for record in self.tlvs)
+
+
+def inspect_iwl_tlv_firmware(data: bytes) -> FirmwareImageSummary:
+    """Inspect an Intel TLV image in memory; never loads or executes firmware.
+
+    The parser checks the common 88-byte TLV header and record boundaries.
+    It intentionally does not claim device compatibility, verify a vendor
+    signature, parse every TLV's semantic payload, or interact with hardware.
+    """
+    if not isinstance(data, bytes):
+        raise TypeError("firmware data must be bytes")
+    if len(data) < IWL_TLV_HEADER_BYTES:
+        raise FirmwareFormatError("truncated Intel TLV firmware header")
+    if len(data) > IWL_MAX_FIRMWARE_BYTES:
+        raise FirmwareFormatError("firmware exceeds the 8 MiB inspection limit")
+
+    zero, magic = struct.unpack_from("<II", data, 0)
+    if zero != 0 or magic != IWL_TLV_MAGIC:
+        raise FirmwareFormatError("invalid Intel TLV firmware magic/header")
+
+    packed_version, build = struct.unpack_from("<II", data, 72)
+    major = (packed_version >> 24) & 0xFF
+    minor = (packed_version >> 16) & 0xFF
+    api = (packed_version >> 8) & 0xFF
+    serial = packed_version & 0xFF
+    human_readable = data[8:72].split(b"\0", 1)[0].decode("ascii", errors="replace")
+
+    records: list[FirmwareTlv] = []
+    cursor = IWL_TLV_HEADER_BYTES
+    while cursor < len(data):
+        if len(records) >= IWL_MAX_TLV_RECORDS:
+            raise FirmwareFormatError("firmware contains too many TLV records")
+        if len(data) - cursor < 8:
+            raise FirmwareFormatError("truncated Intel TLV record header")
+
+        type_id, length = struct.unpack_from("<II", data, cursor)
+        payload_start = cursor + 8
+        if length > len(data) - payload_start:
+            raise FirmwareFormatError("Intel TLV payload extends beyond the file")
+
+        padded_length = (length + 3) & ~3
+        if padded_length > len(data) - payload_start:
+            raise FirmwareFormatError("truncated Intel TLV alignment padding")
+
+        records.append(FirmwareTlv(type_id=type_id, length=length))
+        cursor = payload_start + padded_length
+
+    return FirmwareImageSummary(
+        file_bytes=len(data),
+        human_readable=human_readable,
+        major=major,
+        minor=minor,
+        api=api,
+        serial=serial,
+        build=build,
+        tlvs=tuple(records),
+    )
