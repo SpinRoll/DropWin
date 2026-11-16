@@ -5,7 +5,6 @@ import struct
 import pytest
 
 from dropwin.platform.intel_ax201_transport import (
-    IWL_RX_TRANSFER_DESC_BYTES,
     IWL_TFH_MAX_FRAME_BYTES,
     IWL_TFH_MAX_TB_BYTES,
     IWL_TFH_NUM_TBS,
@@ -13,7 +12,6 @@ from dropwin.platform.intel_ax201_transport import (
     QUZ_MAX_PENDING_TFDS,
     TxBuffer,
     encode_gen2_tx_doorbell_value,
-    encode_iwl_rx_transfer_desc,
     encode_iwl_tfh_tfd,
     quz_tx_pending_count,
     quz_tx_queue_advance,
@@ -81,32 +79,33 @@ def test_tfh_tfd_rejects_wrong_types_and_bool_as_integer() -> None:
         encode_iwl_tfh_tfd([TxBuffer(0, True)])
 
 
-def test_rx_transfer_descriptor_is_16_bytes_with_zero_reserved_words() -> None:
-    result = encode_iwl_rx_transfer_desc(
-        rbid=0x1234,
-        dma_address=0x1122334455667788,
+def test_quz_rx_buffer_descriptor_is_8_bytes_and_packs_12_bit_vid() -> None:
+    result = encode_quz_rx_buffer_descriptor(
+        rbid=0x123,
+        dma_address=0x1122334455667000,
     )
 
-    assert len(result) == IWL_RX_TRANSFER_DESC_BYTES == 16
-    assert result == struct.pack(
-        "<HHHHQ", 0x1234, 0, 0, 0, 0x1122334455667788
-    )
+    assert len(result) == 8
+    assert result == struct.pack("<Q", 0x1122334455667123)
+    assert int.from_bytes(result, "little") & 0xFFF == 0x123
 
 
 @pytest.mark.parametrize(
     ("rbid", "address", "error"),
     [
-        (-1, 0, ValueError),
-        (1 << 16, 0, ValueError),
-        (True, 0, TypeError),
-        (0, -1, ValueError),
-        (0, 1 << 64, ValueError),
-        (0, False, TypeError),
+        (-1, 0x1000, ValueError),
+        (0x1000, 0x1000, ValueError),
+        (0, 0x1000, ValueError),
+        (True, 0x1000, TypeError),
+        (1, -1, ValueError),
+        (1, 1 << 64, ValueError),
+        (1, 0x1001, ValueError),
+        (1, False, TypeError),
     ],
 )
-def test_rx_transfer_descriptor_rejects_invalid_fields(rbid, address, error) -> None:
+def test_quz_rx_buffer_descriptor_rejects_invalid_fields(rbid, address, error) -> None:
     with pytest.raises(error):
-        encode_iwl_rx_transfer_desc(rbid=rbid, dma_address=address)
+        encode_quz_rx_buffer_descriptor(rbid=rbid, dma_address=address)
 
 
 def test_quz_tx_counter_wraps_at_256() -> None:
