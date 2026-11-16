@@ -420,3 +420,12 @@ References:
 - **Secure Boot driver:** architecture and Microsoft attestation-signing candidate documented; exact Windows 11 Home acceptance and a full signed package are not yet demonstrated.
 
 The next safe work item is to turn the source map into a versioned host-only specification and synthetic state tests for queue ownership, RX completion ordering, interrupt/NAPI state transitions, and failure/timeout handling. Do not write a PCI/DMA/firmware driver until that specification has an independent review and the signing gate is resolved.
+
+
+## Synthetic fail-closed DMA teardown gate — 2026-11-16
+
+Added `dropwin/platform/intel_ax201_lifecycle.py` with a pure-Python `QuzDmaQuiescenceGate`. It requires three independent synthetic confirmations before its predicate allows DMA-memory release: RX DMA idle, PCIe bus mastering disabled, and RX NAPI/deferred work synchronized. A timeout/failure permanently closes the gate; the model refuses later “success” flags and reports that memory must remain quarantined.
+
+Tests in `tests/test_intel_ax201_lifecycle.py` cover each missing prerequisite, the independent nature of RX idle versus bus-master stop and NAPI synchronization, and permanent fail-closed behavior.
+
+This is a safety-contract model only. It does not issue a stop request, poll a device, synchronize real Windows DPC/work items, allocate or free DMA memory, or prove the Linux timing values are sufficient for a Windows implementation. The Windows driver must implement and independently validate those operations using the actual WDF/PCIe lifecycle.
