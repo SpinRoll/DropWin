@@ -226,3 +226,88 @@ def encode_gen2_tx_doorbell_value(*, queue_id: int, write_pointer: int) -> int:
         )
     _require_uint(write_pointer, bits=8, field="Gen2 TX write pointer")
     return (queue_id << 16) | write_pointer
+
+
+class QuzRxBufferLedger:
+    """Synthetic ownership ledger for pre-AX210 multi-queue RX buffer IDs.
+
+    This models only the logical VID ownership transitions. It does not model
+    allocator batching, per-queue completion rings, page allocation, DMA
+    mapping, descriptor posting, interrupts, or hardware teardown.
+    """
+
+    FREE = "free"
+    POSTED = "posted"
+    COMPLETED = "completed"
+    USED = "used"
+    ALLOCATOR_EMPTY = "allocator_empty"
+    ALLOCATOR_ALLOCATED = "allocator_allocated"
+
+    def __init__(self, *, pool_size: int) -> None:
+        if isinstance(pool_size, bool) or not isinstance(pool_size, int):
+            raise TypeError("RX pool size must be an integer")
+        if not 2 <= pool_size <= QUZ_RX_QUEUE_SIZE_HE:
+            raise ValueError("RX pool size must be between 2 and 2048")
+        self.pool_size = pool_size
+        # VID zero is reserved; Linux's global_table is indexed by VID - 1.
+        self._states = {vid: self.FREE for vid in range(1, pool_size + 1)}
+
+    def _require_vid(self, vid: int) -> None:
+        if isinstance(vid, bool) or not isinstance(vid, int):
+            raise TypeError("RX buffer ID must be an integer")
+        if not 1 <= vid <= self.pool_size:
+            raise ValueError("RX buffer ID is outside the ledger pool")
+
+    def _transition(self, vid: int, expected: str, target: str) -> None:
+        self._require_vid(vid)
+        current = self._states[vid]
+        if current != expected:
+            raise ValueError(
+                f"RX buffer {vid} is {current}, expected {expected}"
+            )
+        self._states[vid] = target
+
+    def state(self, vid: int) -> str:
+        """Return one VID's synthetic ownership state."""
+        self._require_vid(vid)
+        return self._states[vid]
+
+    def counts(self) -> dict[str, int]:
+        """Return counts by state; intended for deterministic tests."""
+        return {
+            state: sum(current == state for current in self._states.values())
+            for state in (
+                self.FREE, self.POSTED, self.COMPLETED, self.USED,
+                self.ALLOCATOR_EMPTY, self.ALLOCATOR_ALLOCATED,
+            )
+        }
+
+    def post(self, vid: int) -> None:
+        self._transition(vid, self.FREE, self.POSTED)
+
+    def complete(self, vid: int) -> None:
+        """Accept a completion only for a currently posted VID."""
+        self._transition(vid, self.POSTED, self.COMPLETED)
+
+    def recycle_unstolen(self, vid: int) -> None:
+        """Return a completed buffer whose page remains host-owned."""
+        self._transition(vid, self.COMPLETED, self.FREE)
+
+    def mark_page_stolen(self, vid: int) -> None:
+        """Record that upper layers took the page; replacement is required."""
+        self._transition(vid, self.COMPLETED, self.USED)
+
+    def release_to_allocator(self, vid: int) -> None:
+        self._transition(vid, self.USED, self.ALLOCATOR_EMPTY)
+
+    def mark_allocator_page_ready(self, vid: int) -> None:
+        """Model allocator completion without allocating or mapping a page."""
+        self._transition(
+            vid, self.ALLOCATOR_EMPTY, self.ALLOCATOR_ALLOCATED
+        )
+
+    def publish_replacement(self, vid: int) -> None:
+        """Return a synthetic replacement buffer to the free-list state."""
+        self._transition(
+            vid, self.ALLOCATOR_ALLOCATED, self.FREE
+        )
