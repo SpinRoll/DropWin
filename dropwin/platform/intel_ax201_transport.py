@@ -311,3 +311,41 @@ class QuzRxBufferLedger:
         self._transition(
             vid, self.ALLOCATOR_ALLOCATED, self.FREE
         )
+
+
+def quz_rx_completed_count(
+    read_pointer: int, firmware_read_pointer: int, *, queue_size: int
+) -> int:
+    """Count completed MQ RX entries between host and firmware indices.
+
+    The firmware status index is the exclusive end position, matching the
+    Linux RX loop (host read index advances until it equals the status index).
+    """
+    for name, pointer in (
+        ("host read", read_pointer),
+        ("firmware read", firmware_read_pointer),
+    ):
+        _require_uint(pointer, bits=16, field=f"QuZ RX {name} pointer")
+        if pointer >= queue_size:
+            raise ValueError("QuZ RX pointer must be smaller than queue size")
+    if isinstance(queue_size, bool) or not isinstance(queue_size, int):
+        raise TypeError("RX queue size must be an integer")
+    if queue_size not in (QUZ_RX_QUEUE_SIZE_NON_HE, QUZ_RX_QUEUE_SIZE_HE):
+        raise ValueError("QuZ RX queue size must be 512 or 2048 entries")
+    return (firmware_read_pointer - read_pointer) & (queue_size - 1)
+
+
+def quz_rx_restock_doorbell_pointer(write_pointer: int, *, queue_size: int) -> int:
+    """Return the 8-entry-aligned QuZ MQ RX restock pointer, without I/O.
+
+    Linux rounds the host write index down to a multiple of eight before
+    updating RFH_Q_FRBDCB_WIDX_TRG for pre-BZ multi-queue devices.
+    """
+    if isinstance(queue_size, bool) or not isinstance(queue_size, int):
+        raise TypeError("RX queue size must be an integer")
+    if queue_size not in (QUZ_RX_QUEUE_SIZE_NON_HE, QUZ_RX_QUEUE_SIZE_HE):
+        raise ValueError("QuZ RX queue size must be 512 or 2048 entries")
+    _require_uint(write_pointer, bits=16, field="QuZ RX write pointer")
+    if write_pointer >= queue_size:
+        raise ValueError("QuZ RX write pointer must be smaller than queue size")
+    return write_pointer & ~0x7
