@@ -128,6 +128,38 @@ def quz_tx_pending_count(read_pointer: int, write_pointer: int) -> int:
     return (write_pointer - read_pointer) & (QUZ_TFD_QUEUE_SIZE - 1)
 
 
+
+def encode_quz_tx_byte_count_entry(*, byte_count: int, num_tbs: int) -> bytes:
+    """Serialize the pre-AX210 QuZ TX byte-count table entry.
+
+    Linux's 22000/QuZ path stores the TX byte count in dwords in the low
+    12 bits, and the number of additional 64-byte TFD fetch chunks in the
+    upper bits. The fetch count comes from the populated TFD prefix
+    (2-byte header + 10 bytes per active TB). This only encodes the 16-bit
+    table value; it does not allocate or write the scheduler byte-count table.
+    """
+    if isinstance(byte_count, bool) or not isinstance(byte_count, int):
+        raise TypeError("TX byte count must be an integer")
+    if byte_count <= 0:
+        raise ValueError("TX byte count must be positive")
+    dword_count = (byte_count + 3) // 4
+    if dword_count > 0x0FFF:
+        raise ValueError("QuZ TX byte count exceeds the 12-bit dword field")
+
+    if isinstance(num_tbs, bool) or not isinstance(num_tbs, int):
+        raise TypeError("TFD buffer count must be an integer")
+    if not 1 <= num_tbs <= IWL_TFH_NUM_TBS:
+        raise ValueError(f"TFD buffer count must be between 1 and {IWL_TFH_NUM_TBS}")
+
+    populated_tfd_bytes = 2 + (num_tbs * 10)
+    fetch_chunks = ((populated_tfd_bytes + 63) // 64) - 1
+    if not 0 <= fetch_chunks <= 0xF:
+        raise AssertionError("internal TFD fetch chunk calculation is out of range")
+
+    entry = dword_count | (fetch_chunks << 12)
+    return struct.pack("<H", entry)
+
+
 def encode_gen2_tx_doorbell_value(*, queue_id: int, write_pointer: int) -> int:
     """Build the Gen2 HBUS_TARG_WRPTR value; this does not write the register."""
     _require_uint(queue_id, bits=6, field="Gen2 TX queue ID")
