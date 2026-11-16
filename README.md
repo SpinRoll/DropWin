@@ -72,6 +72,18 @@ The Intel 24.80.0.2 update therefore did not change the key reported limitation.
 
 Next decision gate: investigate whether a documented, safe AX201 interface exists for the raw radio operations AWDL requires. If no such path can be established, the built-in AX201 may not be a viable radio for native AirDrop on this machine. DropWin must not present this adapter as AWDL-compatible or imply that an application-only change can bypass missing driver/radio capabilities.
 
+## Windows native AirDrop reference — 2026-11-16
+
+A separate experimental project, [21Suspect/AirDrop-for-Windows](https://github.com/21Suspect/AirDrop-for-Windows), now documents real transfers through Apple's native AirDrop UI: iPhone to Windows, Windows to iPhone, and Mac to Windows. Its maintainer reports successful real-device transfers, but only on one exact Intel AX211 PCI device: `PCI\\VEN_8086&DEV_7A70&SUBSYS_00948086&REV_11`. This is meaningful proof that a Windows native AirDrop receiver is technically possible; it is not a supported solution for this project's AX201.
+
+The reference implementation uses a custom Windows KMDF radio driver, Intel firmware, Owly/AWDL, and Wintun. It requires Windows Test Mode, administrator approval, Secure Boot disabled, and wired Ethernet while the Wi-Fi radio is dedicated to AirDrop. Its current preview has low throughput and known compatibility, pairing, security-audit, reliability, and recovery limitations. Its installer explicitly rejects adapters other than the exact tested AX211 hardware ID. Do not install its driver or attempt to force its INF on the Lenovo AX201. Do not disable Secure Boot or enable Test Mode on the user's machine as an exploratory step.
+
+The user's AX201 hardware ID (`PCI\\VEN_8086&DEV_A0F0&SUBSYS_00748086&REV_20`) does not match that AX211 device. Adapting the radio driver to AX201 would be a separate hardware-specific driver-development effort; the AX211 result does not prove that AX201 can run the same firmware, DMA, radio configuration, or AWDL path. This is now the most relevant Windows-native research reference, but it does not remove the AX201 hardware blocker.
+
+The EU DMA interoperability work must not be interpreted as a ready-made way for a Windows PC to register in Apple's existing AirDrop recipient sheet. The European Commission describes close-range file-transfer APIs as enabling third-party file-sharing apps that offer alternatives to AirDrop on iOS; that is different from making a Windows receiver appear in the native AirDrop UI. See the [Commission's explanation](https://digital-markets-act.ec.europa.eu/businesses-portal/interoperability/apple-specification-proceedings-interoperability-connected-devices-and-request-based-process_en) and its [May 2026 factsheet](https://digital-markets-act.ec.europa.eu/factsheet-how-dma-making-smartphones-better-interoperability-and-data-portability-case-studies-2026-05-11_en).
+
+Next research gate: compare the AX211 reference's documented hardware/firmware assumptions against the Lenovo AX201, without changing the user's driver or boot-security configuration. Until a technically safe AX201 path is demonstrated, DropWin must not claim this laptop can receive native AirDrop.
+
 - [OpenDrop](https://github.com/seemoo-lab/opendrop) — Python AirDrop protocol implementation; upstream documents macOS and Linux/AWDL requirements, not native Windows support.
 - [Open Wireless Link (OWL)](https://github.com/seemoo-lab/owl) — open AWDL implementation primarily for Linux.
 - [winawdl](https://github.com/raph559/winawdl) — research implementation currently documented for Realtek RTL8852CE only; it uses a custom radio driver and is not compatible by assumption with Intel AX201.
