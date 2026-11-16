@@ -244,3 +244,19 @@ Linux's RX comments describe a shared host/firmware buffer lifecycle with read/w
 - AX211 reference RX ring and ownership path: https://github.com/21Suspect/AirDrop-for-Windows/blob/main/native/intel/ax211_boot.inc
 
 **Next static Gate A task:** trace the QuZ-specific command queue initialization, read/write pointer and doorbell updates, RX default queue setup, and completion/interrupt path. Build table-driven unit tests for descriptor sizes, endianness, index wrap and invalid lengths. These tests must operate on synthetic memory only. Do not add PCI register writes, DMA allocations, firmware start, RF operations or a laptop driver in this phase.
+
+## Host-only TX/RX descriptor primitives — 2026-11-16
+
+**Implementation milestone:** `dropwin/platform/intel_ax201_transport.py` now contains pure in-memory serializers for the common Gen2/TFH descriptor formats, plus isolated QuZ queue-counter arithmetic.
+
+- A TFH TFD is serialized to exactly 256 bytes: a little-endian 16-bit buffer count, 25 packed 10-byte entries (`u16 length + u64 address`), and a zeroed 32-bit pad. The serializer checks 1–25 segments, each no larger than 4 KiB minus 4 bytes, and a combined frame limit of 8 KiB.
+- An RX transfer descriptor is serialized to 16 bytes: `u16 rbid`, three zeroed reserved `u16` fields, and a 64-bit address.
+- The QuZ TX write counter advances with a 256-entry power-of-two mask. A helper reports the modular read/write distance, with the documented one-slot-empty discipline (at most 255 pending descriptors).
+- A separate helper constructs the Gen2 `HBUS_TARG_WRPTR` value from a queue ID and write pointer. It returns an integer only; it never writes a register.
+
+The layout is cross-referenced against Linux `iwl-fh.h` (TFH TFD/TB and 22000 ring constants), `pcie/tx-gen2.c` (write-pointer doorbell), and `pcie/internal.h` (16-byte RX transfer descriptor). See:
+- https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/iwl-fh.h
+- https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/pcie/tx-gen2.c
+- https://github.com/torvalds/linux/blob/master/drivers/net/wireless/intel/iwlwifi/pcie/internal.h
+
+**Strict boundary:** these serializers operate only on caller-supplied integers and Python objects. They do not allocate/map DMA, choose a DMA mask, create queue memory, populate the TX byte-count table, configure interrupt handling, post descriptors, write a doorbell, or start firmware. The RX ring depth, RX buffer sizing, completion/status queues, buffer ownership, replenishment and teardown lifecycle remain unimplemented and must be independently mapped for QuZ before any hardware work. AX211 queue/session code is not copied. Synthetic tests verify byte layout and bounds only; no physical adapter validation or AWDL capability is claimed.
